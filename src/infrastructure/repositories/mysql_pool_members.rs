@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use sqlx::{MySqlPool, Row};
 
-use crate::application::pools::{NewMemberRecord, PoolMemberRepository};
+use crate::application::pools::{NewMemberRecord, PoolMemberRepository, PoolMemberWithName};
 use crate::domain::pools::PoolMember;
 use crate::errors::AppError;
 use crate::infrastructure::repositories::mapper;
@@ -52,6 +52,22 @@ impl PoolMemberRepository for MySqlPoolMemberRepository {
             .fetch_all(&self.pool)
             .await?;
         rows.into_iter().map(map_member).collect()
+    }
+
+    async fn list_for_pool_with_names(
+        &self,
+        pool_id: &str,
+    ) -> Result<Vec<PoolMemberWithName>, AppError> {
+        let sql = "SELECT pm.id, pm.pool_id, pm.user_id, pm.role, pm.status, pm.joined_at, \
+             pm.left_at, pm.created_at, pm.updated_at, u.display_name \
+             FROM pool_members pm \
+             JOIN users u ON u.id = pm.user_id \
+             WHERE pm.pool_id = ? ORDER BY pm.joined_at";
+        let rows = sqlx::query(sql)
+            .bind(pool_id)
+            .fetch_all(&self.pool)
+            .await?;
+        rows.into_iter().map(map_member_with_name).collect()
     }
 
     async fn count_active_owners(&self, pool_id: &str) -> Result<u64, AppError> {
@@ -131,5 +147,13 @@ fn map_member(row: sqlx::mysql::MySqlRow) -> Result<PoolMember, AppError> {
         left_at: mapper::opt_datetime(row.try_get("left_at")?)?,
         created_at: mapper::datetime(row.try_get("created_at")?)?,
         updated_at: mapper::datetime(row.try_get("updated_at")?)?,
+    })
+}
+
+fn map_member_with_name(row: sqlx::mysql::MySqlRow) -> Result<PoolMemberWithName, AppError> {
+    let display_name: String = row.try_get("display_name")?;
+    Ok(PoolMemberWithName {
+        member: map_member(row)?,
+        display_name,
     })
 }

@@ -52,4 +52,5 @@ pub struct MeUser {
     pub id: String,
     pub display_name: String,
     pub email: String,
+    pub role: String,
 }

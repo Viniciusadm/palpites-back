@@ -8,7 +8,8 @@ use palpites_back::application::matches::{
     CreateMatchRecord, MatchFilters, MatchRepository, UpdateMatchRecord,
 };
 use palpites_back::application::pools::{
-    CreatePoolSeed, NewMemberRecord, PoolMemberRepository, PoolRepository, UpdatePoolRecord,
+    CreatePoolSeed, NewMemberRecord, PoolMemberRepository, PoolMemberWithName, PoolRepository,
+    UpdatePoolRecord,
 };
 use palpites_back::application::predictions::{
     PredictionRepository, PredictionUseCases, UpsertPrediction, UpsertPredictionRecord,
@@ -390,6 +391,20 @@ impl PoolMemberRepository for FakeMembers {
 
     async fn list_for_pool(&self, _: &str) -> Result<Vec<PoolMember>, AppError> {
         Ok(self.membership.clone().into_iter().collect())
+    }
+    async fn list_for_pool_with_names(
+        &self,
+        pool_id: &str,
+    ) -> Result<Vec<PoolMemberWithName>, AppError> {
+        Ok(self
+            .list_for_pool(pool_id)
+            .await?
+            .into_iter()
+            .map(|member| PoolMemberWithName {
+                display_name: member.user_id.as_str().to_owned(),
+                member,
+            })
+            .collect())
     }
 
     async fn count_active_owners(&self, _: &str) -> Result<u64, AppError> {

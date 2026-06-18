@@ -2,7 +2,7 @@ use async_trait::async_trait;
 use sqlx::{MySqlPool, Row};
 
 use crate::application::results::{
-    PoolRecompute, PredictionLine, ResultApplication, StandingRepository,
+    PoolRecompute, PredictionLine, ResultApplication, StandingRepository, StandingWithName,
 };
 use crate::database::transaction::DatabaseTransaction;
 use crate::domain::standings::Standing;
@@ -32,6 +32,23 @@ impl StandingRepository for MySqlStandingRepository {
             .fetch_all(&self.pool)
             .await?;
         rows.into_iter().map(map_standing).collect()
+    }
+
+    async fn list_for_pool_with_names(
+        &self,
+        pool_id: &str,
+    ) -> Result<Vec<StandingWithName>, AppError> {
+        let sql = "SELECT s.id, s.pool_id, s.pool_member_id, s.total_points, s.exact_count, \
+             s.outcome_count, s.hits_count, s.position, s.updated_at, u.display_name \
+             FROM pool_standings s \
+             JOIN pool_members pm ON pm.id = s.pool_member_id \
+             JOIN users u ON u.id = pm.user_id \
+             WHERE s.pool_id = ? ORDER BY s.position, s.total_points DESC";
+        let rows = sqlx::query(sql)
+            .bind(pool_id)
+            .fetch_all(&self.pool)
+            .await?;
+        rows.into_iter().map(map_standing_with_name).collect()
     }
 
     async fn prediction_lines_for_pool(
@@ -148,6 +165,14 @@ fn map_standing(row: sqlx::mysql::MySqlRow) -> Result<Standing, AppError> {
         hits_count: row.try_get("hits_count")?,
         position: row.try_get("position")?,
         updated_at: mapper::datetime(row.try_get("updated_at")?)?,
+    })
+}
+
+fn map_standing_with_name(row: sqlx::mysql::MySqlRow) -> Result<StandingWithName, AppError> {
+    let display_name: String = row.try_get("display_name")?;
+    Ok(StandingWithName {
+        standing: map_standing(row)?,
+        display_name,
     })
 }
 

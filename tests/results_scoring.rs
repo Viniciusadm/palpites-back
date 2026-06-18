@@ -9,12 +9,12 @@ use palpites_back::application::matches::{
     CreateMatchRecord, MatchFilters, MatchRepository, UpdateMatchRecord,
 };
 use palpites_back::application::pools::{
-    CreatePoolSeed, NewMemberRecord, NewScoringRuleRecord, PoolMemberRepository, PoolRepository,
-    ScoringRuleRepository, UpdatePoolRecord,
+    CreatePoolSeed, NewMemberRecord, NewScoringRuleRecord, PoolMemberRepository,
+    PoolMemberWithName, PoolRepository, ScoringRuleRepository, UpdatePoolRecord,
 };
 use palpites_back::application::results::{
     EnterResult, PoolRecompute, PredictionLine, ResultApplication, ResultUseCases, StandingRecord,
-    StandingRepository,
+    StandingRepository, StandingWithName,
 };
 use palpites_back::domain::matches::{Match, MatchStatus};
 use palpites_back::domain::pools::{
@@ -442,6 +442,20 @@ impl StandingRepository for FakeStandings {
     async fn list_for_pool(&self, pool_id: &str) -> Result<Vec<Standing>, AppError> {
         Ok(self.standings.lock().unwrap().get(pool_id).cloned().unwrap_or_default())
     }
+    async fn list_for_pool_with_names(
+        &self,
+        pool_id: &str,
+    ) -> Result<Vec<StandingWithName>, AppError> {
+        Ok(self
+            .list_for_pool(pool_id)
+            .await?
+            .into_iter()
+            .map(|standing| StandingWithName {
+                display_name: standing.pool_member_id.as_str().to_owned(),
+                standing,
+            })
+            .collect())
+    }
 
     async fn prediction_lines_for_pool(
         &self,
@@ -690,6 +704,20 @@ impl PoolMemberRepository for FakeMembers {
 
     async fn list_for_pool(&self, pool_id: &str) -> Result<Vec<PoolMember>, AppError> {
         Ok(self.by_pool.lock().unwrap().get(pool_id).cloned().unwrap_or_default())
+    }
+    async fn list_for_pool_with_names(
+        &self,
+        pool_id: &str,
+    ) -> Result<Vec<PoolMemberWithName>, AppError> {
+        Ok(self
+            .list_for_pool(pool_id)
+            .await?
+            .into_iter()
+            .map(|member| PoolMemberWithName {
+                display_name: member.user_id.as_str().to_owned(),
+                member,
+            })
+            .collect())
     }
 
     async fn count_active_owners(&self, _: &str) -> Result<u64, AppError> {

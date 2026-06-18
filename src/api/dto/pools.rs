@@ -1,8 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::application::pools::{
-    ChangeMemberRole, CreatePool, JoinOutcome, JoinPool, ScoringRuleInput, UpdatePoolSettings,
-    UpdateScoringRules,
+    ChangeMemberRole, CreatePool, JoinOutcome, JoinPool, PoolMemberWithName, ScoringRuleInput,
+    UpdatePoolSettings, UpdateScoringRules,
 };
 use crate::domain::pools::{Pool, PoolMember, PoolScoringRule};
 
@@ -137,6 +137,7 @@ pub struct PoolMemberResponse {
     pub id: String,
     pub pool_id: String,
     pub user_id: String,
+    pub display_name: String,
     pub role: String,
     pub status: String,
     pub joined_at: String,
@@ -145,10 +146,19 @@ pub struct PoolMemberResponse {
 
 impl PoolMemberResponse {
     pub fn from_member(member: &PoolMember) -> Self {
+        Self::build(member, String::new())
+    }
+
+    pub fn from_member_with_name(value: &PoolMemberWithName) -> Self {
+        Self::build(&value.member, value.display_name.clone())
+    }
+
+    fn build(member: &PoolMember, display_name: String) -> Self {
         Self {
             id: member.id.as_str().to_owned(),
             pool_id: member.pool_id.as_str().to_owned(),
             user_id: member.user_id.as_str().to_owned(),
+            display_name,
             role: member.role.as_str().to_owned(),
             status: member.status.as_str().to_owned(),
             joined_at: member.joined_at.as_str().to_owned(),

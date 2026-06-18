@@ -1,9 +1,8 @@
 use serde::{Deserialize, Serialize};
 
 use crate::application::results::{
-    EnterResult, HistoryEntry, HistorySummary, MemberPredictionView, Ranking,
+    EnterResult, HistoryEntry, HistorySummary, MemberPredictionView, Ranking, StandingWithName,
 };
-use crate::domain::standings::Standing;
 
 #[derive(Debug, Deserialize)]
 pub struct EnterResultRequest {
@@ -23,6 +22,7 @@ impl From<EnterResultRequest> for EnterResult {
 #[derive(Debug, Serialize)]
 pub struct RankingEntryResponse {
     pub pool_member_id: String,
+    pub display_name: String,
     pub total_points: i32,
     pub exact_count: i32,
     pub outcome_count: i32,
@@ -31,14 +31,15 @@ pub struct RankingEntryResponse {
 }
 
 impl RankingEntryResponse {
-    pub fn from_standing(value: &Standing) -> Self {
+    pub fn from_entry(value: &StandingWithName) -> Self {
         Self {
-            pool_member_id: value.pool_member_id.as_str().to_owned(),
-            total_points: value.total_points,
-            exact_count: value.exact_count,
-            outcome_count: value.outcome_count,
-            hits_count: value.hits_count,
-            position: value.position,
+            pool_member_id: value.standing.pool_member_id.as_str().to_owned(),
+            display_name: value.display_name.clone(),
+            total_points: value.standing.total_points,
+            exact_count: value.standing.exact_count,
+            outcome_count: value.standing.outcome_count,
+            hits_count: value.standing.hits_count,
+            position: value.standing.position,
         }
     }
 }
@@ -54,7 +55,7 @@ impl RankingResponse {
             standings: value
                 .standings
                 .iter()
-                .map(RankingEntryResponse::from_standing)
+                .map(RankingEntryResponse::from_entry)
                 .collect(),
         }
     }

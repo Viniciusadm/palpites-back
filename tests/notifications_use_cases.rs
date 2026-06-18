@@ -8,7 +8,8 @@ use palpites_back::application::notifications::{
     NotificationRepository, NotificationUseCases, PreferenceInput, UpdatePreferences,
 };
 use palpites_back::application::pools::{
-    CreatePoolSeed, NewMemberRecord, PoolMemberRepository, PoolRepository, UpdatePoolRecord,
+    CreatePoolSeed, NewMemberRecord, PoolMemberRepository, PoolMemberWithName, PoolRepository,
+    UpdatePoolRecord,
 };
 use palpites_back::application::shared::Notifier;
 use palpites_back::domain::matches::{Match, MatchStatus};
@@ -446,6 +447,20 @@ impl PoolMemberRepository for FakeMembers {
 
     async fn list_for_pool(&self, _pool_id: &str) -> Result<Vec<PoolMember>, AppError> {
         Ok(self.members.clone())
+    }
+    async fn list_for_pool_with_names(
+        &self,
+        pool_id: &str,
+    ) -> Result<Vec<PoolMemberWithName>, AppError> {
+        Ok(self
+            .list_for_pool(pool_id)
+            .await?
+            .into_iter()
+            .map(|member| PoolMemberWithName {
+                display_name: member.user_id.as_str().to_owned(),
+                member,
+            })
+            .collect())
     }
 
     async fn count_active_owners(&self, _pool_id: &str) -> Result<u64, AppError> {

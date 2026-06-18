@@ -4,6 +4,12 @@ use crate::domain::standings::Standing;
 use crate::errors::AppError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StandingWithName {
+    pub standing: Standing,
+    pub display_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PredictionLine {
     pub prediction_id: String,
     pub pool_member_id: String,
@@ -54,6 +60,10 @@ pub struct ResultApplication {
 #[async_trait]
 pub trait StandingRepository: Send + Sync {
     async fn list_for_pool(&self, pool_id: &str) -> Result<Vec<Standing>, AppError>;
+    async fn list_for_pool_with_names(
+        &self,
+        pool_id: &str,
+    ) -> Result<Vec<StandingWithName>, AppError>;
     async fn prediction_lines_for_pool(
         &self,
         pool_id: &str,

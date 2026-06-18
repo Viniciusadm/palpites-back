@@ -126,7 +126,7 @@ where
     ) -> Result<Ranking, AppError> {
         let pool = self.load_pool(pool_id).await?;
         self.ensure_can_view(&pool, viewer_user_id).await?;
-        let standings = self.standings.list_for_pool(pool_id).await?;
+        let standings = self.standings.list_for_pool_with_names(pool_id).await?;
         Ok(Ranking { standings })
     }
 

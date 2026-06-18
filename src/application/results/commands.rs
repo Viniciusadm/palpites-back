@@ -1,4 +1,4 @@
-use crate::domain::standings::Standing;
+use crate::application::results::StandingWithName;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnterResult {
@@ -45,5 +45,5 @@ pub struct MemberPredictionView {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ranking {
-    pub standings: Vec<Standing>,
+    pub standings: Vec<StandingWithName>,
 }

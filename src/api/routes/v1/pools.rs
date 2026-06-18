@@ -180,7 +180,10 @@ async fn list_members(State(state): State<AppState>, member: PoolMember) -> Resp
 
     match membership_use_cases(db).list(&member.pool_id).await {
         Ok(members) => Json(PoolMembersListResponse {
-            members: members.iter().map(PoolMemberResponse::from_member).collect(),
+            members: members
+                .iter()
+                .map(PoolMemberResponse::from_member_with_name)
+                .collect(),
         })
         .into_response(),
         Err(error) => app_error(error),

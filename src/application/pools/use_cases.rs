@@ -2,8 +2,9 @@ use uuid::Uuid;
 
 use crate::application::pools::{
     ChangeMemberRole, CreatePool, CreatePoolSeed, JoinOutcome, JoinPool, NewMemberRecord,
-    NewPoolRecord, NewScoringRuleRecord, PoolMemberRepository, PoolRepository, ScoringRuleInput,
-    ScoringRuleRepository, UpdatePoolRecord, UpdatePoolSettings, UpdateScoringRules,
+    NewPoolRecord, NewScoringRuleRecord, PoolMemberRepository, PoolMemberWithName, PoolRepository,
+    ScoringRuleInput, ScoringRuleRepository, UpdatePoolRecord, UpdatePoolSettings,
+    UpdateScoringRules,
 };
 use crate::application::shared::{Clock, Notifier};
 use crate::domain::pools::{
@@ -270,8 +271,8 @@ where
         Self { members, clock }
     }
 
-    pub async fn list(&self, pool_id: &str) -> Result<Vec<PoolMember>, AppError> {
-        self.members.list_for_pool(pool_id).await
+    pub async fn list(&self, pool_id: &str) -> Result<Vec<PoolMemberWithName>, AppError> {
+        self.members.list_for_pool_with_names(pool_id).await
     }
 
     pub async fn remove(

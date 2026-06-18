@@ -4,6 +4,12 @@ use crate::domain::pools::{Pool, PoolMember, PoolScoringRule};
 use crate::errors::AppError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PoolMemberWithName {
+    pub member: PoolMember,
+    pub display_name: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct NewPoolRecord {
     pub pool_id: String,
     pub tournament_id: String,
@@ -74,6 +80,10 @@ pub trait PoolMemberRepository: Send + Sync {
     ) -> Result<Option<PoolMember>, AppError>;
     async fn find_by_id(&self, member_id: &str) -> Result<Option<PoolMember>, AppError>;
     async fn list_for_pool(&self, pool_id: &str) -> Result<Vec<PoolMember>, AppError>;
+    async fn list_for_pool_with_names(
+        &self,
+        pool_id: &str,
+    ) -> Result<Vec<PoolMemberWithName>, AppError>;
     async fn count_active_owners(&self, pool_id: &str) -> Result<u64, AppError>;
     async fn create(&self, record: NewMemberRecord) -> Result<(), AppError>;
     async fn reactivate(&self, member_id: &str, joined_at: &str) -> Result<(), AppError>;

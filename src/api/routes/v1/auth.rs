@@ -40,6 +40,7 @@ async fn me(State(state): State<AppState>, auth: AuthenticatedUser) -> Response 
             id: user.id.as_str().to_owned(),
             display_name: user.display_name.as_str().to_owned(),
             email: user.email.as_str().to_owned(),
+            role: user.role.as_str().to_owned(),
         },
     })
     .into_response()
