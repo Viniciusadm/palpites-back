@@ -1,0 +1,13 @@
+CREATE TABLE teams (
+  id CHAR(36) NOT NULL,
+  name VARCHAR(120) NOT NULL,
+  code VARCHAR(8) NOT NULL,
+  flag_emoji VARCHAR(16) NULL,
+  flag_file_id CHAR(36) NULL,
+  created_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6),
+  updated_at DATETIME(6) NOT NULL DEFAULT CURRENT_TIMESTAMP(6) ON UPDATE CURRENT_TIMESTAMP(6),
+  PRIMARY KEY (id),
+  UNIQUE KEY teams_code_unique (code),
+  CONSTRAINT teams_flag_file_id_fk FOREIGN KEY (flag_file_id)
+    REFERENCES files (id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
