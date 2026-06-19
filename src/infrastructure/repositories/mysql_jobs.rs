@@ -2,8 +2,8 @@ use async_trait::async_trait;
 use sqlx::{MySqlPool, Row};
 
 use crate::application::jobs::{
-    OutboundNotification, OutboundNotificationRepository, ReminderQueryRepository,
-    RemindedRecipient,
+    LiveMatchRepository, OutboundNotification, OutboundNotificationRepository,
+    ReminderQueryRepository, RemindedRecipient,
 };
 use crate::domain::matches::Match;
 use crate::errors::AppError;
@@ -74,5 +74,19 @@ impl OutboundNotificationRepository for MySqlJobsRepository {
 
     async fn mark_delivered(&self, _id: &str, _delivered_at: &str) -> Result<(), AppError> {
         Ok(())
+    }
+}
+
+#[async_trait]
+impl LiveMatchRepository for MySqlJobsRepository {
+    async fn start_due_matches(&self, now: &str) -> Result<u64, AppError> {
+        let result = sqlx::query(
+            "UPDATE matches SET status = 'live' \
+             WHERE status = 'scheduled' AND kickoff_at <= ?",
+        )
+        .bind(now)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected())
     }
 }

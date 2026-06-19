@@ -43,3 +43,12 @@ pub trait NotificationSender: Send + Sync {
     fn channel(&self) -> Channel;
     async fn send(&self, notification: &OutboundNotification) -> Result<(), AppError>;
 }
+
+#[async_trait]
+pub trait LiveMatchRepository: Send + Sync {
+    /// Transitions scheduled matches whose kickoff time has already passed to the live
+    /// status. `now` is an ISO-8601 UTC timestamp and is compared against `kickoff_at`,
+    /// which is also stored in UTC, so the result is independent of any client timezone.
+    /// Returns the number of matches that were transitioned.
+    async fn start_due_matches(&self, now: &str) -> Result<u64, AppError>;
+}

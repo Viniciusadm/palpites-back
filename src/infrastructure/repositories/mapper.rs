@@ -1,4 +1,4 @@
-use chrono::{NaiveDate, NaiveDateTime};
+use chrono::{NaiveDate, NaiveDateTime, SecondsFormat};
 
 use crate::domain::matches::MatchStatus;
 use crate::domain::notifications::{Channel, NotificationType};
@@ -104,7 +104,10 @@ pub fn email(value: String) -> Result<Email, AppError> {
 }
 
 pub fn datetime(value: NaiveDateTime) -> Result<UtcDateTime, AppError> {
-    Ok(UtcDateTime::new_iso8601(value.to_string())?)
+    // O banco armazena UTC sem offset; emitimos RFC3339 com sufixo `Z` para que o
+    // instante seja inequívoco no cliente (ex.: "2026-06-18T19:00:00.000Z").
+    let iso = value.and_utc().to_rfc3339_opts(SecondsFormat::Millis, true);
+    Ok(UtcDateTime::new_iso8601(iso)?)
 }
 
 pub fn opt_datetime(value: Option<NaiveDateTime>) -> Result<Option<UtcDateTime>, AppError> {

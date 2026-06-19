@@ -19,6 +19,7 @@ pub struct AppConfig {
     pub jobs_reminder_interval_seconds: u64,
     pub jobs_reminder_window_minutes: u32,
     pub jobs_dispatch_interval_seconds: u64,
+    pub jobs_live_interval_seconds: u64,
 }
 
 impl AppConfig {
@@ -66,6 +67,10 @@ impl AppConfig {
             .ok()
             .and_then(|value| value.parse().ok())
             .unwrap_or(60);
+        let jobs_live_interval_seconds = env::var("JOBS_LIVE_INTERVAL_SECONDS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(60);
 
         Self {
             host,
@@ -84,6 +89,7 @@ impl AppConfig {
             jobs_reminder_interval_seconds,
             jobs_reminder_window_minutes,
             jobs_dispatch_interval_seconds,
+            jobs_live_interval_seconds,
         }
     }
 

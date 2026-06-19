@@ -3,8 +3,8 @@ use std::collections::HashSet;
 use chrono::Duration;
 
 use crate::application::jobs::{
-    DispatchSummary, NotificationSender, OutboundNotificationRepository, ReminderQueryRepository,
-    ReminderWindow,
+    DispatchSummary, LiveMatchRepository, NotificationSender, OutboundNotificationRepository,
+    ReminderQueryRepository, ReminderWindow,
 };
 use crate::application::pools::{PoolMemberRepository, PoolRepository};
 use crate::application::predictions::PredictionRepository;
@@ -173,9 +173,26 @@ where
     }
 }
 
-pub async fn sync_live_matches() -> Result<(), AppError> {
-    tracing::info!(
-        "sync_live_matches has no external score feed configured; this is a future extension point"
-    );
-    Ok(())
+pub struct StartLiveMatches<R, C> {
+    matches: R,
+    clock: C,
+}
+
+impl<R, C> StartLiveMatches<R, C>
+where
+    R: LiveMatchRepository,
+    C: Clock,
+{
+    pub fn new(matches: R, clock: C) -> Self {
+        Self { matches, clock }
+    }
+
+    pub async fn run(&self) -> Result<u64, AppError> {
+        let now = self.clock.now();
+        let started = self.matches.start_due_matches(now.as_str()).await?;
+        if started > 0 {
+            tracing::info!(count = started, "transitioned scheduled matches to live");
+        }
+        Ok(started)
+    }
 }
