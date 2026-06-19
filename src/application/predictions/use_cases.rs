@@ -76,6 +76,13 @@ where
             ));
         }
 
+        if game.home_team_id.is_none() || game.away_team_id.is_none() {
+            return Err(AppError::validation_code(
+                "match_teams_undefined",
+                "predictions are not open until both teams are defined",
+            ));
+        }
+
         let home_score = Score::new(command.home_score)?;
         let away_score = Score::new(command.away_score)?;
 
@@ -128,6 +135,14 @@ where
         })?;
         let now = parse_datetime(self.clock.now().as_str())
             .ok_or_else(|| AppError::Internal("clock produced an invalid date-time".to_owned()))?;
+
+        let opens_at = kickoff - Duration::days(5);
+        if now <= opens_at {
+            return Err(AppError::validation_code(
+                "prediction_not_open_yet",
+                "predictions for this match are not open yet",
+            ));
+        }
 
         let lock_at = kickoff - Duration::minutes(i64::from(lock_offset_minutes));
         if now < lock_at {

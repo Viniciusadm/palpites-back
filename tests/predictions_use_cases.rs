@@ -128,6 +128,58 @@ async fn finished_match_is_locked_regardless_of_time() {
 }
 
 #[tokio::test]
+async fn upsert_more_than_five_days_before_is_rejected() {
+    let use_cases = build(FakePredictions::default(), member(MemberStatus::Active), clock("2026-06-12 11:00:00"));
+
+    let result = use_cases
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 })
+        .await;
+
+    assert_code(result, "prediction_not_open_yet");
+}
+
+#[tokio::test]
+async fn upsert_exactly_five_days_before_is_rejected() {
+    let use_cases = build(FakePredictions::default(), member(MemberStatus::Active), clock("2026-06-13 12:00:00"));
+
+    let result = use_cases
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 })
+        .await;
+
+    assert_code(result, "prediction_not_open_yet");
+}
+
+#[tokio::test]
+async fn upsert_within_five_days_persists_prediction() {
+    let predictions = FakePredictions::default();
+    let use_cases = build(predictions.clone(), member(MemberStatus::Active), clock("2026-06-14 11:00:00"));
+
+    use_cases
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 2, away_score: 1 })
+        .await
+        .unwrap();
+
+    assert_eq!(predictions.rows.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn upsert_without_defined_teams_is_rejected() {
+    let use_cases = PredictionUseCases::new(
+        FakePredictions::default(),
+        FakeMatches::without_teams(),
+        FakePools::default(),
+        FakeMembers::new(member(MemberStatus::Active)),
+        clock("2026-06-14 11:00:00"),
+    );
+
+    let result = use_cases
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 })
+        .await;
+
+    assert_code(result, "match_teams_undefined");
+}
+
+#[tokio::test]
 async fn list_mine_returns_member_predictions() {
     let predictions = FakePredictions::default();
     let use_cases = build(predictions.clone(), member(MemberStatus::Active), clock("2026-06-18 11:00:00"));
@@ -177,7 +229,11 @@ fn member(status: MemberStatus) -> Option<PoolMember> {
 }
 
 fn assert_locked(result: Result<Prediction, AppError>) {
-    assert!(matches!(result, Err(AppError::Coded { code, .. }) if code == "prediction_locked"));
+    assert_code(result, "prediction_locked");
+}
+
+fn assert_code(result: Result<Prediction, AppError>, expected: &str) {
+    assert!(matches!(result, Err(AppError::Coded { code, .. }) if code == expected));
 }
 
 fn id(value: &str) -> DomainId {
@@ -252,11 +308,16 @@ fn to_prediction(record: &UpsertPredictionRecord) -> Prediction {
 #[derive(Clone)]
 struct FakeMatches {
     status: MatchStatus,
+    teams_defined: bool,
 }
 
 impl FakeMatches {
     fn with_status(status: MatchStatus) -> Self {
-        Self { status }
+        Self { status, teams_defined: true }
+    }
+
+    fn without_teams() -> Self {
+        Self { status: MatchStatus::Scheduled, teams_defined: false }
     }
 }
 
@@ -274,8 +335,8 @@ impl MatchRepository for FakeMatches {
             id: id(MATCH_ID),
             tournament_id: id(TOURNAMENT_ID),
             stage_id: id("stage-1"),
-            home_team_id: Some(id("team-home")),
-            away_team_id: Some(id("team-away")),
+            home_team_id: self.teams_defined.then(|| id("team-home")),
+            away_team_id: self.teams_defined.then(|| id("team-away")),
             kickoff_at: UtcDateTime::new_iso8601(KICKOFF.to_owned()).unwrap(),
             status: self.status,
             home_score: None,
