@@ -4,16 +4,14 @@ use crate::domain::pools::{Pool, PoolMember, PoolScoringRule};
 pub struct CreatePool {
     pub name: String,
     pub tournament_id: String,
-    pub visibility: Option<String>,
-    pub ranking_public: Option<bool>,
+    pub join_requires_allowlist: Option<bool>,
     pub prediction_lock_offset_minutes: Option<u16>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UpdatePoolSettings {
     pub name: String,
-    pub visibility: String,
-    pub ranking_public: bool,
+    pub join_requires_allowlist: bool,
     pub prediction_lock_offset_minutes: u16,
     pub status: String,
 }

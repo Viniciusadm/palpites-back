@@ -10,7 +10,9 @@ use crate::application::jobs::{
 use crate::application::notifications::NotificationUseCases;
 use crate::config::AppConfig;
 use crate::infrastructure::clock::SystemClock;
-use crate::infrastructure::jobs::senders::{LogEmailSender, LogPushSender};
+use crate::infrastructure::jobs::fcm::{FcmPushSender, FcmSettings};
+use crate::infrastructure::jobs::senders::LogPushSender;
+use crate::infrastructure::repositories::mysql_device_tokens::MySqlDeviceTokenRepository;
 use crate::infrastructure::repositories::mysql_jobs::MySqlJobsRepository;
 use crate::infrastructure::repositories::mysql_notification_preferences::MySqlNotificationPreferenceRepository;
 use crate::infrastructure::repositories::mysql_notifications::MySqlNotificationRepository;
@@ -41,11 +43,12 @@ pub fn spawn(pool: MySqlPool, config: &AppConfig) {
 
     let dispatch_interval = Duration::from_secs(config.jobs_dispatch_interval_seconds);
     let dispatch_pool = pool.clone();
+    let dispatch_fcm = fcm_settings(config);
     tokio::spawn(async move {
         let mut ticker = interval(dispatch_interval);
         loop {
             ticker.tick().await;
-            if let Err(error) = run_dispatch(&dispatch_pool).await {
+            if let Err(error) = run_dispatch(&dispatch_pool, dispatch_fcm.clone()).await {
                 tracing::error!(%error, "dispatch_notifications job failed");
             }
         }
@@ -75,6 +78,7 @@ async fn run_reminders(
         MySqlNotificationPreferenceRepository::new(pool.clone()),
         MySqlPoolRepository::new(pool.clone()),
         MySqlPoolMemberRepository::new(pool.clone()),
+        MySqlJobsRepository::new(pool.clone()),
         SystemClock,
     );
     let runner = SendPredictionReminders::new(
@@ -88,10 +92,35 @@ async fn run_reminders(
     runner.run(window).await
 }
 
-async fn run_dispatch(pool: &MySqlPool) -> Result<(), crate::errors::AppError> {
-    let senders: Vec<Box<dyn NotificationSender>> =
-        vec![Box::new(LogEmailSender), Box::new(LogPushSender)];
-    let runner = DispatchNotifications::new(MySqlJobsRepository::new(pool.clone()), senders, SystemClock);
+fn fcm_settings(config: &AppConfig) -> Option<FcmSettings> {
+    match (&config.fcm_project_id, &config.fcm_service_account_path) {
+        (Some(project_id), Some(service_account_path)) => Some(FcmSettings {
+            project_id: project_id.clone(),
+            service_account_path: service_account_path.clone(),
+        }),
+        _ => None,
+    }
+}
+
+async fn run_dispatch(
+    pool: &MySqlPool,
+    fcm: Option<FcmSettings>,
+) -> Result<(), crate::errors::AppError> {
+    let push: Box<dyn NotificationSender> = match fcm {
+        Some(settings) => {
+            match FcmPushSender::new(settings, MySqlDeviceTokenRepository::new(pool.clone())) {
+                Ok(sender) => Box::new(sender),
+                Err(error) => {
+                    tracing::error!(%error, "failed to initialize FCM push sender; falling back to no-op");
+                    Box::new(LogPushSender)
+                }
+            }
+        }
+        None => Box::new(LogPushSender),
+    };
+    let senders: Vec<Box<dyn NotificationSender>> = vec![push];
+    let runner =
+        DispatchNotifications::new(MySqlJobsRepository::new(pool.clone()), senders, SystemClock);
     runner.run(PENDING_DISPATCH_LIMIT).await?;
     Ok(())
 }

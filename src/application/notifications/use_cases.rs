@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use uuid::Uuid;
 
 use crate::application::notifications::{
-    NewNotificationRecord, NewPreferenceRecord, NotificationPreferenceRepository,
-    NotificationRepository, UpdatePreferences,
+    NewNotificationRecord, NewOutboxRecord, NewPreferenceRecord, NotificationOutboxWriter,
+    NotificationPreferenceRepository, NotificationRepository, UpdatePreferences,
 };
 use crate::application::pools::{PoolMemberRepository, PoolRepository};
 use crate::application::shared::{Clock, Notifier, ReminderRecipient};
@@ -16,11 +16,12 @@ use crate::domain::notifications::{
 use crate::domain::pools::MemberStatus;
 use crate::errors::AppError;
 
-pub struct NotificationUseCases<N, P, PoolR, MemberR, C> {
+pub struct NotificationUseCases<N, P, PoolR, MemberR, O, C> {
     notifications: N,
     preferences: P,
     pools: PoolR,
     members: MemberR,
+    outbox: O,
     clock: C,
 }
 
@@ -29,20 +30,29 @@ struct Recipient {
     pool_id: String,
 }
 
-impl<N, P, PoolR, MemberR, C> NotificationUseCases<N, P, PoolR, MemberR, C>
+impl<N, P, PoolR, MemberR, O, C> NotificationUseCases<N, P, PoolR, MemberR, O, C>
 where
     N: NotificationRepository,
     P: NotificationPreferenceRepository,
     PoolR: PoolRepository,
     MemberR: PoolMemberRepository,
+    O: NotificationOutboxWriter,
     C: Clock,
 {
-    pub fn new(notifications: N, preferences: P, pools: PoolR, members: MemberR, clock: C) -> Self {
+    pub fn new(
+        notifications: N,
+        preferences: P,
+        pools: PoolR,
+        members: MemberR,
+        outbox: O,
+        clock: C,
+    ) -> Self {
         Self {
             notifications,
             preferences,
             pools,
             members,
+            outbox,
             clock,
         }
     }
@@ -127,6 +137,7 @@ where
         let (title, body) = copy_for(notification_type);
         let mut cache: HashMap<String, Vec<NotificationPreference>> = HashMap::new();
         let mut records = Vec::new();
+        let mut outbox_records = Vec::new();
 
         for recipient in recipients {
             if !cache.contains_key(&recipient.user_id) {
@@ -135,25 +146,43 @@ where
             }
             let prefs = &cache[&recipient.user_id];
 
-            if !resolve_enabled(prefs, &recipient.pool_id, notification_type, Channel::InApp) {
-                continue;
+            let in_app_enabled =
+                resolve_enabled(prefs, &recipient.pool_id, notification_type, Channel::InApp);
+            let push_enabled =
+                resolve_enabled(prefs, &recipient.pool_id, notification_type, Channel::Push);
+
+            if in_app_enabled {
+                records.push(NewNotificationRecord {
+                    id: new_id(),
+                    user_id: recipient.user_id.clone(),
+                    pool_id: Some(recipient.pool_id.clone()),
+                    notification_type: notification_type.as_str().to_owned(),
+                    title: title.to_owned(),
+                    body: body.to_owned(),
+                    related_match_id: related_match_id.map(ToOwned::to_owned),
+                });
             }
 
-            records.push(NewNotificationRecord {
-                id: new_id(),
-                user_id: recipient.user_id,
-                pool_id: Some(recipient.pool_id),
-                notification_type: notification_type.as_str().to_owned(),
-                title: title.to_owned(),
-                body: body.to_owned(),
-                related_match_id: related_match_id.map(ToOwned::to_owned),
-            });
+            if push_enabled {
+                outbox_records.push(NewOutboxRecord {
+                    id: new_id(),
+                    channel: Channel::Push.as_str().to_owned(),
+                    user_id: recipient.user_id,
+                    title: title.to_owned(),
+                    body: body.to_owned(),
+                    related_match_id: related_match_id.map(ToOwned::to_owned),
+                    pool_id: Some(recipient.pool_id),
+                });
+            }
         }
 
-        if records.is_empty() {
-            return Ok(());
+        if !records.is_empty() {
+            self.notifications.create_many(records).await?;
         }
-        self.notifications.create_many(records).await
+        if !outbox_records.is_empty() {
+            self.outbox.enqueue_many(outbox_records).await?;
+        }
+        Ok(())
     }
 
     async fn active_members(&self, pool_id: &str) -> Result<Vec<Recipient>, AppError> {
@@ -172,12 +201,13 @@ where
 }
 
 #[async_trait]
-impl<N, P, PoolR, MemberR, C> Notifier for NotificationUseCases<N, P, PoolR, MemberR, C>
+impl<N, P, PoolR, MemberR, O, C> Notifier for NotificationUseCases<N, P, PoolR, MemberR, O, C>
 where
     N: NotificationRepository,
     P: NotificationPreferenceRepository,
     PoolR: PoolRepository,
     MemberR: PoolMemberRepository,
+    O: NotificationOutboxWriter,
     C: Clock,
 {
     async fn new_match(&self, game: &Match) -> Result<(), AppError> {
@@ -276,24 +306,27 @@ fn resolve_enabled(
 fn copy_for(notification_type: NotificationType) -> (&'static str, &'static str) {
     match notification_type {
         NotificationType::NewMatch => (
-            "New match scheduled",
-            "A new match has been added to your pool.",
+            "Nova partida marcada",
+            "Uma nova partida foi adicionada ao seu bolão.",
         ),
         NotificationType::MatchResult => (
-            "Match result available",
-            "A match you predicted now has a final result.",
+            "Resultado disponível",
+            "Uma partida em que você palpitou já tem resultado final.",
         ),
         NotificationType::RankingUpdate => {
-            ("Ranking updated", "Your pool ranking has changed.")
+            ("Ranking atualizado", "O ranking do seu bolão mudou.")
         }
-        NotificationType::MemberJoined => {
-            ("New member joined", "A new member has joined your pool.")
-        }
-        NotificationType::PredictionReminder => (
-            "Prediction reminder",
-            "You still have matches waiting for a prediction.",
+        NotificationType::MemberJoined => (
+            "Novo participante",
+            "Um novo participante entrou no seu bolão.",
         ),
-        NotificationType::Invite => ("Pool invite", "You have been invited to a pool."),
+        NotificationType::PredictionReminder => (
+            "Lembrete de palpite",
+            "Você ainda tem partidas esperando o seu palpite.",
+        ),
+        NotificationType::Invite => {
+            ("Convite para bolão", "Você foi convidado para um bolão.")
+        }
     }
 }
 

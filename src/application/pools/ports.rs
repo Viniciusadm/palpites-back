@@ -1,6 +1,6 @@
 use async_trait::async_trait;
 
-use crate::domain::pools::{Pool, PoolMember, PoolScoringRule};
+use crate::domain::pools::{Pool, PoolAllowedEmail, PoolMember, PoolScoringRule};
 use crate::errors::AppError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,8 +16,7 @@ pub struct NewPoolRecord {
     pub owner_user_id: String,
     pub name: String,
     pub invite_code: String,
-    pub visibility: String,
-    pub ranking_public: bool,
+    pub join_requires_allowlist: bool,
     pub prediction_lock_offset_minutes: u16,
     pub status: String,
 }
@@ -26,10 +25,17 @@ pub struct NewPoolRecord {
 pub struct UpdatePoolRecord {
     pub pool_id: String,
     pub name: String,
-    pub visibility: String,
-    pub ranking_public: bool,
+    pub join_requires_allowlist: bool,
     pub prediction_lock_offset_minutes: u16,
     pub status: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NewAllowedEmailRecord {
+    pub id: String,
+    pub pool_id: String,
+    pub email: String,
+    pub added_by_user_id: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -104,4 +110,13 @@ pub trait ScoringRuleRepository: Send + Sync {
         pool_id: &str,
         rules: Vec<NewScoringRuleRecord>,
     ) -> Result<(), AppError>;
+}
+
+#[async_trait]
+pub trait PoolEmailAllowlistRepository: Send + Sync {
+    async fn list_for_pool(&self, pool_id: &str) -> Result<Vec<PoolAllowedEmail>, AppError>;
+    async fn find_by_id(&self, id: &str) -> Result<Option<PoolAllowedEmail>, AppError>;
+    async fn is_email_allowed(&self, pool_id: &str, email: &str) -> Result<bool, AppError>;
+    async fn add(&self, record: NewAllowedEmailRecord) -> Result<PoolAllowedEmail, AppError>;
+    async fn remove(&self, pool_id: &str, id: &str) -> Result<(), AppError>;
 }

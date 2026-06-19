@@ -8,7 +8,7 @@ use crate::errors::AppError;
 use crate::infrastructure::repositories::mapper;
 
 const POOL_COLUMNS: &str = "SELECT id, tournament_id, owner_user_id, name, invite_code, \
-     visibility, ranking_public, prediction_lock_offset_minutes, status, created_at, updated_at \
+     join_requires_allowlist, prediction_lock_offset_minutes, status, created_at, updated_at \
      FROM pools";
 
 #[derive(Clone)]
@@ -53,7 +53,7 @@ impl PoolRepository for MySqlPoolRepository {
 
     async fn list_for_user(&self, user_id: &str) -> Result<Vec<Pool>, AppError> {
         let sql = "SELECT pools.id, pools.tournament_id, pools.owner_user_id, pools.name, \
-             pools.invite_code, pools.visibility, pools.ranking_public, \
+             pools.invite_code, pools.join_requires_allowlist, \
              pools.prediction_lock_offset_minutes, pools.status, pools.created_at, pools.updated_at \
              FROM pools \
              JOIN pool_members ON pool_members.pool_id = pools.id \
@@ -91,17 +91,16 @@ impl PoolRepository for MySqlPoolRepository {
 
         sqlx::query(
             "INSERT INTO pools \
-             (id, tournament_id, owner_user_id, name, invite_code, visibility, \
-              ranking_public, prediction_lock_offset_minutes, status) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+             (id, tournament_id, owner_user_id, name, invite_code, \
+              join_requires_allowlist, prediction_lock_offset_minutes, status) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&seed.pool.pool_id)
         .bind(&seed.pool.tournament_id)
         .bind(&seed.pool.owner_user_id)
         .bind(&seed.pool.name)
         .bind(&seed.pool.invite_code)
-        .bind(&seed.pool.visibility)
-        .bind(seed.pool.ranking_public)
+        .bind(seed.pool.join_requires_allowlist)
         .bind(seed.pool.prediction_lock_offset_minutes)
         .bind(&seed.pool.status)
         .execute(&mut *tx)
@@ -141,13 +140,12 @@ impl PoolRepository for MySqlPoolRepository {
     async fn update_settings(&self, record: UpdatePoolRecord) -> Result<(), AppError> {
         sqlx::query(
             "UPDATE pools \
-             SET name = ?, visibility = ?, ranking_public = ?, \
+             SET name = ?, join_requires_allowlist = ?, \
                  prediction_lock_offset_minutes = ?, status = ? \
              WHERE id = ?",
         )
         .bind(&record.name)
-        .bind(&record.visibility)
-        .bind(record.ranking_public)
+        .bind(record.join_requires_allowlist)
         .bind(record.prediction_lock_offset_minutes)
         .bind(&record.status)
         .bind(&record.pool_id)
@@ -172,8 +170,7 @@ fn map_pool(row: sqlx::mysql::MySqlRow) -> Result<Pool, AppError> {
         owner_user_id: mapper::id(row.try_get("owner_user_id")?)?,
         name: mapper::non_empty(row.try_get("name")?, "pool.name")?,
         invite_code: mapper::invite_code(row.try_get("invite_code")?)?,
-        visibility: mapper::visibility(row.try_get("visibility")?)?,
-        ranking_public: row.try_get("ranking_public")?,
+        join_requires_allowlist: row.try_get("join_requires_allowlist")?,
         prediction_lock_offset_minutes: row.try_get("prediction_lock_offset_minutes")?,
         status: mapper::pool_status(row.try_get("status")?)?,
         created_at: mapper::datetime(row.try_get("created_at")?)?,

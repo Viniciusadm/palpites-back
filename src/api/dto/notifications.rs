@@ -81,6 +81,12 @@ pub struct UpdatePreferencesRequest {
     pub preferences: Vec<PreferenceItemRequest>,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct RegisterDeviceRequest {
+    pub token: String,
+    pub platform: Option<String>,
+}
+
 impl From<UpdatePreferencesRequest> for UpdatePreferences {
     fn from(value: UpdatePreferencesRequest) -> Self {
         Self {

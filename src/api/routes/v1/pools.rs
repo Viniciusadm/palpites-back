@@ -6,9 +6,10 @@ use axum::{Json, Router};
 use sqlx::MySqlPool;
 
 use crate::api::dto::pools::{
-    ChangeMemberRoleRequest, CreatePoolRequest, JoinPoolRequest, JoinPoolResponse,
-    PoolMemberResponse, PoolMembersListResponse, PoolResponse, PoolsListResponse,
-    ScoringRuleResponse, ScoringRulesListResponse, UpdatePoolRequest, UpdateScoringRulesRequest,
+    AddAllowedEmailRequest, AllowedEmailResponse, AllowedEmailsListResponse, ChangeMemberRoleRequest,
+    CreatePoolRequest, DeletePoolRequest, JoinPoolRequest, JoinPoolResponse, PoolMemberResponse,
+    PoolMembersListResponse, PoolResponse, PoolsListResponse, ScoringRuleResponse,
+    ScoringRulesListResponse, UpdatePoolRequest, UpdateScoringRulesRequest,
 };
 use crate::api::dto::results::{HistoryResponse, MemberPredictionsResponse, RankingResponse};
 use crate::api::extractors::{AuthenticatedUser, PoolMember};
@@ -18,9 +19,11 @@ use crate::api::routes::v1::results::result_use_cases;
 use crate::api::state::AppState;
 use crate::application::pools::{MembershipUseCases, PoolUseCases, ScoringRuleUseCases};
 use crate::infrastructure::clock::SystemClock;
+use crate::infrastructure::repositories::mysql_pool_email_allowlist::MySqlPoolEmailAllowlistRepository;
 use crate::infrastructure::repositories::mysql_pool_members::MySqlPoolMemberRepository;
 use crate::infrastructure::repositories::mysql_pools::MySqlPoolRepository;
 use crate::infrastructure::repositories::mysql_scoring_rules::MySqlScoringRuleRepository;
+use crate::infrastructure::repositories::mysql_users::MySqlUserRepository;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -37,6 +40,14 @@ pub fn router() -> Router<AppState> {
             "/pools/:id/scoring-rules",
             get(read_rules).put(update_rules),
         )
+        .route(
+            "/pools/:id/allowed-emails",
+            get(list_allowed_emails).post(add_allowed_email),
+        )
+        .route(
+            "/pools/:id/allowed-emails/:allowed_id",
+            axum::routing::delete(remove_allowed_email),
+        )
         .route("/pools/:id/ranking", get(ranking))
         .route("/pools/:id/history", get(history))
         .route(
@@ -47,12 +58,21 @@ pub fn router() -> Router<AppState> {
 
 fn pool_use_cases(
     db: MySqlPool,
-) -> PoolUseCases<MySqlPoolRepository, MySqlPoolMemberRepository, SystemClock, NotifierImpl> {
+) -> PoolUseCases<
+    MySqlPoolRepository,
+    MySqlPoolMemberRepository,
+    SystemClock,
+    NotifierImpl,
+    MySqlUserRepository,
+    MySqlPoolEmailAllowlistRepository,
+> {
     PoolUseCases::new(
         MySqlPoolRepository::new(db.clone()),
         MySqlPoolMemberRepository::new(db.clone()),
         SystemClock,
-        notifier(db),
+        notifier(db.clone()),
+        MySqlUserRepository::new(db.clone()),
+        MySqlPoolEmailAllowlistRepository::new(db),
     )
 }
 
@@ -148,13 +168,20 @@ async fn update(
     }
 }
 
-async fn delete(State(state): State<AppState>, member: PoolMember) -> Response {
+async fn delete(
+    State(state): State<AppState>,
+    member: PoolMember,
+    Json(request): Json<DeletePoolRequest>,
+) -> Response {
     let db = match state.db() {
         Ok(db) => db,
         Err(error) => return app_error(error),
     };
 
-    match pool_use_cases(db).delete(&member.pool_id, member.pool_role).await {
+    match pool_use_cases(db)
+        .delete(&member.pool_id, member.pool_role, &request.confirm_name)
+        .await
+    {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => app_error(error),
     }
@@ -270,6 +297,66 @@ async fn update_rules(
         rules: rules.iter().map(ScoringRuleResponse::from_rule).collect(),
     })
     .into_response()
+}
+
+async fn list_allowed_emails(State(state): State<AppState>, member: PoolMember) -> Response {
+    let db = match state.db() {
+        Ok(db) => db,
+        Err(error) => return app_error(error),
+    };
+
+    match pool_use_cases(db)
+        .list_allowed_emails(&member.pool_id, member.pool_role)
+        .await
+    {
+        Ok(emails) => Json(AllowedEmailsListResponse {
+            emails: emails.iter().map(AllowedEmailResponse::from_entry).collect(),
+        })
+        .into_response(),
+        Err(error) => app_error(error),
+    }
+}
+
+async fn add_allowed_email(
+    State(state): State<AppState>,
+    member: PoolMember,
+    Json(request): Json<AddAllowedEmailRequest>,
+) -> Response {
+    let db = match state.db() {
+        Ok(db) => db,
+        Err(error) => return app_error(error),
+    };
+
+    match pool_use_cases(db)
+        .add_allowed_email(&member.pool_id, member.pool_role, &member.user_id, request.email)
+        .await
+    {
+        Ok(entry) => (
+            StatusCode::CREATED,
+            Json(AllowedEmailResponse::from_entry(&entry)),
+        )
+            .into_response(),
+        Err(error) => app_error(error),
+    }
+}
+
+async fn remove_allowed_email(
+    State(state): State<AppState>,
+    member: PoolMember,
+    Path((_pool_id, allowed_id)): Path<(String, String)>,
+) -> Response {
+    let db = match state.db() {
+        Ok(db) => db,
+        Err(error) => return app_error(error),
+    };
+
+    match pool_use_cases(db)
+        .remove_allowed_email(&member.pool_id, member.pool_role, &allowed_id)
+        .await
+    {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => app_error(error),
+    }
 }
 
 async fn ranking(State(state): State<AppState>, auth: AuthenticatedUser, Path(pool_id): Path<String>) -> Response {

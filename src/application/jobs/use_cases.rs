@@ -162,12 +162,25 @@ where
                 );
                 continue;
             };
-            sender.send(&notification).await?;
-            let now = self.clock.now();
-            self.outbound
-                .mark_delivered(&notification.id, now.as_str())
-                .await?;
-            delivered += 1;
+            match sender.send(&notification).await {
+                Ok(()) => {
+                    let now = self.clock.now();
+                    self.outbound
+                        .mark_delivered(&notification.id, now.as_str())
+                        .await?;
+                    delivered += 1;
+                }
+                Err(error) => {
+                    tracing::warn!(
+                        id = notification.id,
+                        %error,
+                        "failed to deliver notification; will retry"
+                    );
+                    self.outbound
+                        .mark_failed(&notification.id, &error.to_string())
+                        .await?;
+                }
+            }
         }
         Ok(DispatchSummary { delivered })
     }

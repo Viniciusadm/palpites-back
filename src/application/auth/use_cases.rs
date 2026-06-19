@@ -64,6 +64,13 @@ where
                 "password must be between 8 and 128 characters".to_owned(),
             ));
         }
+        let has_letter = command.password.chars().any(|c| c.is_alphabetic());
+        let has_digit = command.password.chars().any(|c| c.is_ascii_digit());
+        if !has_letter || !has_digit {
+            return Err(AppError::Validation(
+                "password must contain at least one letter and one number".to_owned(),
+            ));
+        }
         if self.users.find_by_email(&email).await?.is_some() {
             return Err(AppError::Conflict("email is already registered".to_owned()));
         }

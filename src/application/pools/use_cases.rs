@@ -1,43 +1,50 @@
 use uuid::Uuid;
 
+use crate::application::auth::UserRepository;
 use crate::application::pools::{
-    ChangeMemberRole, CreatePool, CreatePoolSeed, JoinOutcome, JoinPool, NewMemberRecord,
-    NewPoolRecord, NewScoringRuleRecord, PoolMemberRepository, PoolMemberWithName, PoolRepository,
-    ScoringRuleInput, ScoringRuleRepository, UpdatePoolRecord, UpdatePoolSettings,
-    UpdateScoringRules,
+    ChangeMemberRole, CreatePool, CreatePoolSeed, JoinOutcome, JoinPool, NewAllowedEmailRecord,
+    NewMemberRecord, NewPoolRecord, NewScoringRuleRecord, PoolEmailAllowlistRepository,
+    PoolMemberRepository, PoolMemberWithName, PoolRepository, ScoringRuleInput,
+    ScoringRuleRepository, UpdatePoolRecord, UpdatePoolSettings, UpdateScoringRules,
 };
 use crate::application::shared::{Clock, Notifier};
 use crate::domain::pools::{
-    MemberStatus, Pool, PoolMember, PoolRole, PoolScoringRule, PoolStatus, ScoringRuleKey,
-    Visibility,
+    MemberStatus, Pool, PoolAllowedEmail, PoolMember, PoolRole, PoolScoringRule, PoolStatus,
+    ScoringRuleKey,
 };
-use crate::domain::{InviteCode, NonEmptyString};
+use crate::domain::{Email, InviteCode, NonEmptyString};
 use crate::errors::AppError;
 
 const MAX_LOCK_OFFSET_MINUTES: u16 = 10080;
 const MAX_RULE_POINTS: i16 = 1000;
 const INVITE_CODE_ATTEMPTS: usize = 8;
 
-pub struct PoolUseCases<P, M, C, N> {
+pub struct PoolUseCases<P, M, C, N, U, A> {
     pools: P,
     members: M,
     clock: C,
     notifier: N,
+    users: U,
+    allowlist: A,
 }
 
-impl<P, M, C, N> PoolUseCases<P, M, C, N>
+impl<P, M, C, N, U, A> PoolUseCases<P, M, C, N, U, A>
 where
     P: PoolRepository,
     M: PoolMemberRepository,
     C: Clock,
     N: Notifier,
+    U: UserRepository,
+    A: PoolEmailAllowlistRepository,
 {
-    pub fn new(pools: P, members: M, clock: C, notifier: N) -> Self {
+    pub fn new(pools: P, members: M, clock: C, notifier: N, users: U, allowlist: A) -> Self {
         Self {
             pools,
             members,
             clock,
             notifier,
+            users,
+            allowlist,
         }
     }
 
@@ -58,11 +65,7 @@ where
         command: CreatePool,
     ) -> Result<Pool, AppError> {
         let name = validate_name(command.name)?;
-        let visibility = match command.visibility {
-            Some(value) => Visibility::parse(&value)?,
-            None => Visibility::Private,
-        };
-        let ranking_public = command.ranking_public.unwrap_or(true);
+        let join_requires_allowlist = command.join_requires_allowlist.unwrap_or(false);
         let lock_offset = validate_lock_offset(command.prediction_lock_offset_minutes.unwrap_or(0))?;
 
         let status = self
@@ -88,8 +91,7 @@ where
                 owner_user_id: owner_user_id.to_owned(),
                 name,
                 invite_code,
-                visibility: visibility.as_str().to_owned(),
-                ranking_public,
+                join_requires_allowlist,
                 prediction_lock_offset_minutes: lock_offset,
                 status: PoolStatus::Active.as_str().to_owned(),
             },
@@ -133,7 +135,6 @@ where
         self.get(pool_id).await?;
 
         let name = validate_name(command.name)?;
-        let visibility = Visibility::parse(&command.visibility)?;
         let status = PoolStatus::parse(&command.status)?;
         let lock_offset = validate_lock_offset(command.prediction_lock_offset_minutes)?;
 
@@ -141,8 +142,7 @@ where
             .update_settings(UpdatePoolRecord {
                 pool_id: pool_id.to_owned(),
                 name,
-                visibility: visibility.as_str().to_owned(),
-                ranking_public: command.ranking_public,
+                join_requires_allowlist: command.join_requires_allowlist,
                 prediction_lock_offset_minutes: lock_offset,
                 status: status.as_str().to_owned(),
             })
@@ -173,6 +173,8 @@ where
                 });
             }
 
+            self.ensure_email_allowed(&pool, user_id).await?;
+
             let now = self.clock.now().as_str().to_owned();
             self.members
                 .reactivate(member.id.as_str(), &now)
@@ -185,6 +187,8 @@ where
                 already_member: false,
             });
         }
+
+        self.ensure_email_allowed(&pool, user_id).await?;
 
         let now = self.clock.now().as_str().to_owned();
         let member_id = new_id();
@@ -225,14 +229,105 @@ where
             .await
     }
 
-    pub async fn delete(&self, pool_id: &str, actor: PoolRole) -> Result<(), AppError> {
+    pub async fn delete(
+        &self,
+        pool_id: &str,
+        actor: PoolRole,
+        confirm_name: &str,
+    ) -> Result<(), AppError> {
         if !actor.is_owner() {
             return Err(AppError::Forbidden(
                 "only the owner can delete a pool".to_owned(),
             ));
         }
-        self.get(pool_id).await?;
+        let pool = self.get(pool_id).await?;
+        if pool.name.as_str().trim() != confirm_name.trim() {
+            return Err(AppError::Validation(
+                "o nome informado não corresponde ao nome do bolão".to_owned(),
+            ));
+        }
         self.pools.delete(pool_id).await
+    }
+
+    pub async fn list_allowed_emails(
+        &self,
+        pool_id: &str,
+        actor: PoolRole,
+    ) -> Result<Vec<PoolAllowedEmail>, AppError> {
+        if !actor.can_manage_members() {
+            return Err(AppError::Forbidden(
+                "only an owner or admin can manage the allowlist".to_owned(),
+            ));
+        }
+        self.allowlist.list_for_pool(pool_id).await
+    }
+
+    pub async fn add_allowed_email(
+        &self,
+        pool_id: &str,
+        actor: PoolRole,
+        added_by_user_id: &str,
+        email: String,
+    ) -> Result<PoolAllowedEmail, AppError> {
+        if !actor.can_manage_members() {
+            return Err(AppError::Forbidden(
+                "only an owner or admin can manage the allowlist".to_owned(),
+            ));
+        }
+        let email = Email::new(email)?;
+        self.allowlist
+            .add(NewAllowedEmailRecord {
+                id: new_id(),
+                pool_id: pool_id.to_owned(),
+                email: email.as_str().to_owned(),
+                added_by_user_id: added_by_user_id.to_owned(),
+            })
+            .await
+    }
+
+    pub async fn remove_allowed_email(
+        &self,
+        pool_id: &str,
+        actor: PoolRole,
+        id: &str,
+    ) -> Result<(), AppError> {
+        if !actor.can_manage_members() {
+            return Err(AppError::Forbidden(
+                "only an owner or admin can manage the allowlist".to_owned(),
+            ));
+        }
+        let entry = self
+            .allowlist
+            .find_by_id(id)
+            .await?
+            .ok_or_else(|| AppError::NotFound("allowed email was not found".to_owned()))?;
+        if entry.pool_id.as_str() != pool_id {
+            return Err(AppError::NotFound("allowed email was not found".to_owned()));
+        }
+        self.allowlist.remove(pool_id, id).await
+    }
+
+    async fn ensure_email_allowed(&self, pool: &Pool, user_id: &str) -> Result<(), AppError> {
+        if !pool.join_requires_allowlist {
+            return Ok(());
+        }
+        let user = self
+            .users
+            .find_by_id(user_id)
+            .await?
+            .ok_or_else(|| AppError::NotFound("user was not found".to_owned()))?;
+        if self
+            .allowlist
+            .is_email_allowed(pool.id.as_str(), user.email.as_str())
+            .await?
+        {
+            Ok(())
+        } else {
+            Err(AppError::forbidden_code(
+                "email_not_allowed",
+                "seu e-mail não está autorizado a entrar neste bolão",
+            ))
+        }
     }
 
     async fn reload_member(&self, member_id: &str) -> Result<PoolMember, AppError> {

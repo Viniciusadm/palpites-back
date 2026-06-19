@@ -1,4 +1,4 @@
-use crate::domain::{DomainId, DomainValidationError, InviteCode, NonEmptyString, UtcDateTime};
+use crate::domain::{DomainId, DomainValidationError, Email, InviteCode, NonEmptyString, UtcDateTime};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PoolRole {
@@ -31,29 +31,6 @@ impl PoolRole {
 
     pub fn can_manage_members(&self) -> bool {
         matches!(self, Self::Owner | Self::Admin)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Visibility {
-    Public,
-    Private,
-}
-
-impl Visibility {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::Public => "public",
-            Self::Private => "private",
-        }
-    }
-
-    pub fn parse(value: &str) -> Result<Self, DomainValidationError> {
-        match value {
-            "public" => Ok(Self::Public),
-            "private" => Ok(Self::Private),
-            _ => Err(DomainValidationError::Invalid("visibility")),
-        }
     }
 }
 
@@ -136,8 +113,7 @@ pub struct Pool {
     pub owner_user_id: DomainId,
     pub name: NonEmptyString,
     pub invite_code: InviteCode,
-    pub visibility: Visibility,
-    pub ranking_public: bool,
+    pub join_requires_allowlist: bool,
     pub prediction_lock_offset_minutes: u16,
     pub status: PoolStatus,
     pub created_at: UtcDateTime,
@@ -165,4 +141,13 @@ pub struct PoolMember {
     pub left_at: Option<UtcDateTime>,
     pub created_at: UtcDateTime,
     pub updated_at: UtcDateTime,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PoolAllowedEmail {
+    pub id: DomainId,
+    pub pool_id: DomainId,
+    pub email: Email,
+    pub added_by_user_id: DomainId,
+    pub created_at: UtcDateTime,
 }

@@ -78,22 +78,22 @@ Princípios que o template segue (e que você deve manter):
 
 Replique o mesmo padrão, camada por camada:
 
-1. **Application** — `src/application/products/`
+1. **Application** - `src/application/products/`
    - `ports.rs`: trait `ProductRepository` (+ records de persistência)
    - `commands.rs`: DTOs de entrada/saída
    - `use_cases.rs`: `ProductUseCases<R>` genérico sobre o(s) port(s)
    - `mod.rs`: `pub use commands/ports/use_cases::*;`
    - registre `pub mod products;` em `src/application/mod.rs`
-2. **Domain** — `src/domain/products/{mod.rs,entities.rs}`; value objects novos
+2. **Domain** - `src/domain/products/{mod.rs,entities.rs}`; value objects novos
    vão em `src/domain/value_objects.rs`. Sem dependências de framework.
-3. **Infrastructure** — `src/infrastructure/repositories/mysql_products.rs`
+3. **Infrastructure** - `src/infrastructure/repositories/mysql_products.rs`
    implementa o trait; conversões de linha → domínio em `mapper.rs`. Registre
    em `repositories/mod.rs`.
-4. **API** — `src/api/routes/v1/products.rs` com `router()` + handlers;
+4. **API** - `src/api/routes/v1/products.rs` com `router()` + handlers;
    instancie o caso de uso por request e trate erros com `app_error()`. Faça
    `.merge(products::router())` em `src/api/routes/v1/mod.rs`.
-5. **DTOs** — `src/api/dto/products.rs` com `From<Request> for Command`.
-6. **Tests** — `tests/products_use_cases.rs` com fakes dos ports (veja
+5. **DTOs** - `src/api/dto/products.rs` com `From<Request> for Command`.
+6. **Tests** - `tests/products_use_cases.rs` com fakes dos ports (veja
    `tests/auth_use_cases.rs` como modelo).
 
 ## Variáveis de ambiente
@@ -104,7 +104,7 @@ Veja `.env.example`. Resumo:
 |------------------|------------------------|----------------------------------------|
 | `HTTP_HOST`      | `127.0.0.1`            | Host de bind                           |
 | `HTTP_PORT`      | `3001`                 | Porta                                  |
-| `DATABASE_URL`   | —                      | Conexão MySQL (sem ela, sem persistência) |
+| `DATABASE_URL`   | -                      | Conexão MySQL (sem ela, sem persistência) |
 | `JWT_SECRET`     | `development-only-secret` | Segredo de assinatura do JWT        |
 | `RUN_MIGRATIONS` | `true`                 | Rodar migrations no boot               |
 | `FILES_BACKEND`  | `local`                | Backend de arquivos: `local` ou `s3` (stub) |
@@ -112,7 +112,7 @@ Veja `.env.example`. Resumo:
 | `FILES_LOCAL_DIR`| `./storage`            | Raiz do adapter local                  |
 | `FILES_PUBLIC_BASE_URL` | `http://127.0.0.1:3001/files-local` | Base das URLs assinadas (local) |
 | `FILES_MAX_BYTE_SIZE` | `5242880`         | Tamanho máximo de upload em bytes (5 MiB) |
-| `S3_REGION` / `S3_ENDPOINT` | —          | Config do backend s3 (stub neste build) |
+| `S3_REGION` / `S3_ENDPOINT` | -          | Config do backend s3 (stub neste build) |
 | `JOBS_ENABLED`   | `true`                 | Liga o scheduler de jobs em background (tokio) |
 | `JOBS_REMINDER_INTERVAL_SECONDS` | `300`  | Intervalo do job de lembretes de palpite |
 | `JOBS_REMINDER_WINDOW_MINUTES` | `60`     | Janela para "lock se aproximando" dos lembretes |

@@ -35,7 +35,7 @@ async fn register_creates_user_and_issues_token() {
         .register(RegisterCommand {
             display_name: "Nova Pessoa".to_owned(),
             email: "NOVA@EXAMPLE.COM".to_owned(),
-            password: "correct-password".to_owned(),
+            password: "correct-password1".to_owned(),
         })
         .await
         .unwrap();
@@ -51,7 +51,7 @@ async fn register_creates_user_and_issues_token() {
     let record = &records[0];
     assert_eq!(record.user_id, session.user_id);
     assert_eq!(record.email, "nova@example.com");
-    assert_eq!(record.password_hash, "hash-correct-password");
+    assert_eq!(record.password_hash, "hash-correct-password1");
     assert_eq!(record.display_name, "Nova Pessoa");
 }
 
@@ -67,7 +67,7 @@ async fn register_rejects_duplicate_email() {
         .register(RegisterCommand {
             display_name: "Nova Pessoa".to_owned(),
             email: "taken@example.com".to_owned(),
-            password: "correct-password".to_owned(),
+            password: "correct-password1".to_owned(),
         })
         .await;
 
@@ -83,6 +83,36 @@ async fn register_rejects_short_password() {
             display_name: "Nova Pessoa".to_owned(),
             email: "nova@example.com".to_owned(),
             password: "short".to_owned(),
+        })
+        .await;
+
+    assert!(matches!(result, Err(AppError::Validation(_))));
+}
+
+#[tokio::test]
+async fn register_rejects_password_without_number() {
+    let use_cases = AuthUseCases::new(FakeUsers::default(), FakePasswords, FakeTokens);
+
+    let result = use_cases
+        .register(RegisterCommand {
+            display_name: "Nova Pessoa".to_owned(),
+            email: "nova@example.com".to_owned(),
+            password: "onlyletters".to_owned(),
+        })
+        .await;
+
+    assert!(matches!(result, Err(AppError::Validation(_))));
+}
+
+#[tokio::test]
+async fn register_rejects_password_without_letter() {
+    let use_cases = AuthUseCases::new(FakeUsers::default(), FakePasswords, FakeTokens);
+
+    let result = use_cases
+        .register(RegisterCommand {
+            display_name: "Nova Pessoa".to_owned(),
+            email: "nova@example.com".to_owned(),
+            password: "12345678".to_owned(),
         })
         .await;
 

@@ -351,9 +351,9 @@ where
             .await?
             .filter(|member| member.status == MemberStatus::Active)
             .is_some();
-        if !is_member && !pool.ranking_public {
+        if !is_member {
             return Err(AppError::forbidden_code(
-                "ranking_not_public",
+                "not_pool_member",
                 "this pool's ranking is private to its members",
             ));
         }

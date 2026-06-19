@@ -20,6 +20,8 @@ pub struct AppConfig {
     pub jobs_reminder_window_minutes: u32,
     pub jobs_dispatch_interval_seconds: u64,
     pub jobs_live_interval_seconds: u64,
+    pub fcm_project_id: Option<String>,
+    pub fcm_service_account_path: Option<String>,
 }
 
 impl AppConfig {
@@ -71,6 +73,12 @@ impl AppConfig {
             .ok()
             .and_then(|value| value.parse().ok())
             .unwrap_or(60);
+        let fcm_project_id = env::var("FCM_PROJECT_ID")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
+        let fcm_service_account_path = env::var("FCM_SERVICE_ACCOUNT_PATH")
+            .ok()
+            .filter(|value| !value.trim().is_empty());
 
         Self {
             host,
@@ -90,6 +98,8 @@ impl AppConfig {
             jobs_reminder_window_minutes,
             jobs_dispatch_interval_seconds,
             jobs_live_interval_seconds,
+            fcm_project_id,
+            fcm_service_account_path,
         }
     }
 

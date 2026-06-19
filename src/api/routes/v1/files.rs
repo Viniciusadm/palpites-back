@@ -17,12 +17,18 @@ use crate::infrastructure::repositories::mysql_files::{
 use crate::infrastructure::repositories::mysql_users::MySqlUserRepository;
 use crate::infrastructure::storage;
 
-pub fn router() -> Router<AppState> {
+/// Rotas de arquivo que não exigem privilégio admin (upload, detalhe, avatar do
+/// próprio usuário). Ficam fora da auditoria de admin.
+pub fn public_router() -> Router<AppState> {
     Router::new()
         .route("/files", post(upload))
         .route("/files/:id", get(detail))
         .route("/users/me/avatar", put(link_avatar))
-        .route("/teams/:id/flag", put(link_team_flag))
+}
+
+/// Rotas de arquivo restritas a admin (auditadas).
+pub fn admin_router() -> Router<AppState> {
+    Router::new().route("/teams/:id/flag", put(link_team_flag))
 }
 
 async fn upload(

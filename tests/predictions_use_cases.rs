@@ -16,7 +16,7 @@ use palpites_back::application::predictions::{
 };
 use palpites_back::domain::matches::{Match, MatchStatus};
 use palpites_back::domain::pools::{
-    MemberStatus, Pool, PoolMember, PoolRole, PoolStatus, Visibility,
+    MemberStatus, Pool, PoolMember, PoolRole, PoolStatus,
 };
 use palpites_back::domain::predictions::Prediction;
 use palpites_back::domain::{DomainId, InviteCode, NonEmptyString, Score, UtcDateTime};
@@ -387,8 +387,7 @@ impl PoolRepository for FakePools {
             owner_user_id: id("owner-1"),
             name: NonEmptyString::new("Bolão".to_owned(), "pool.name").unwrap(),
             invite_code: InviteCode::new("ABC123".to_owned()).unwrap(),
-            visibility: Visibility::Private,
-            ranking_public: true,
+            join_requires_allowlist: false,
             prediction_lock_offset_minutes: LOCK_OFFSET,
             status: PoolStatus::Active,
             created_at: now(),

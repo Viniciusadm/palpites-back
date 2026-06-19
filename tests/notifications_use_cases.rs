@@ -4,8 +4,9 @@ use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
 use palpites_back::application::notifications::{
-    NewNotificationRecord, NewPreferenceRecord, NotificationPreferenceRepository,
-    NotificationRepository, NotificationUseCases, PreferenceInput, UpdatePreferences,
+    NewNotificationRecord, NewOutboxRecord, NewPreferenceRecord, NotificationOutboxWriter,
+    NotificationPreferenceRepository, NotificationRepository, NotificationUseCases, PreferenceInput,
+    UpdatePreferences,
 };
 use palpites_back::application::pools::{
     CreatePoolSeed, NewMemberRecord, PoolMemberRepository, PoolMemberWithName, PoolRepository,
@@ -17,7 +18,7 @@ use palpites_back::domain::notifications::{
     Channel, Notification, NotificationPreference, NotificationType,
 };
 use palpites_back::domain::pools::{
-    MemberStatus, Pool, PoolMember, PoolRole, PoolStatus, Visibility,
+    MemberStatus, Pool, PoolMember, PoolRole, PoolStatus,
 };
 use palpites_back::domain::{DomainId, InviteCode, NonEmptyString, UtcDateTime};
 use palpites_back::errors::AppError;
@@ -26,7 +27,14 @@ use support::FixedClock;
 const POOL_ID: &str = "pool-1";
 const TOURNAMENT_ID: &str = "tournament-1";
 
-type UseCases = NotificationUseCases<FakeNotifications, FakePreferences, FakePools, FakeMembers, FixedClock>;
+type UseCases = NotificationUseCases<
+    FakeNotifications,
+    FakePreferences,
+    FakePools,
+    FakeMembers,
+    FakeOutbox,
+    FixedClock,
+>;
 
 fn build(
     notifications: FakeNotifications,
@@ -34,11 +42,22 @@ fn build(
     pools: FakePools,
     members: FakeMembers,
 ) -> UseCases {
+    build_with_outbox(notifications, preferences, pools, members, FakeOutbox::default())
+}
+
+fn build_with_outbox(
+    notifications: FakeNotifications,
+    preferences: FakePreferences,
+    pools: FakePools,
+    members: FakeMembers,
+    outbox: FakeOutbox,
+) -> UseCases {
     NotificationUseCases::new(
         notifications,
         preferences,
         pools,
         members,
+        outbox,
         FixedClock::new("2026-06-18 12:00:00"),
     )
 }
@@ -71,6 +90,59 @@ async fn member_joined_notifies_owner_and_admins_only() {
     assert!(rows
         .iter()
         .all(|n| n.notification_type == NotificationType::MemberJoined));
+}
+
+#[tokio::test]
+async fn member_joined_enqueues_push_outbox_for_recipients() {
+    let outbox = FakeOutbox::default();
+    let members = FakeMembers::with(vec![
+        member("m-owner", "owner-u", PoolRole::Owner, MemberStatus::Active),
+        member("m-member", "member-u", PoolRole::Member, MemberStatus::Active),
+    ]);
+    let use_cases = build_with_outbox(
+        FakeNotifications::default(),
+        FakePreferences::default(),
+        FakePools::default(),
+        members,
+        outbox.clone(),
+    );
+
+    use_cases.member_joined(POOL_ID, "joiner-u").await.unwrap();
+
+    let enqueued = outbox.enqueued.lock().unwrap();
+    // Only the owner can manage members, so a single push is enqueued, on the push channel.
+    assert_eq!(enqueued.len(), 1);
+    assert_eq!(enqueued[0].channel, "push");
+    assert_eq!(enqueued[0].user_id, "owner-u");
+}
+
+#[tokio::test]
+async fn disabled_push_channel_suppresses_outbox() {
+    let outbox = FakeOutbox::default();
+    let preferences = FakePreferences::with(vec![pref(
+        "owner-u",
+        Some(POOL_ID),
+        NotificationType::MemberJoined,
+        Channel::Push,
+        false,
+    )]);
+    let members = FakeMembers::with(vec![member(
+        "m-owner",
+        "owner-u",
+        PoolRole::Owner,
+        MemberStatus::Active,
+    )]);
+    let use_cases = build_with_outbox(
+        FakeNotifications::default(),
+        preferences,
+        FakePools::default(),
+        members,
+        outbox.clone(),
+    );
+
+    use_cases.member_joined(POOL_ID, "joiner-u").await.unwrap();
+
+    assert!(outbox.enqueued.lock().unwrap().is_empty());
 }
 
 #[tokio::test]
@@ -248,6 +320,19 @@ async fn update_preferences_rejects_invite_type() {
             ..
         })
     ));
+}
+
+#[derive(Clone, Default)]
+struct FakeOutbox {
+    enqueued: Arc<Mutex<Vec<NewOutboxRecord>>>,
+}
+
+#[async_trait]
+impl NotificationOutboxWriter for FakeOutbox {
+    async fn enqueue_many(&self, records: Vec<NewOutboxRecord>) -> Result<(), AppError> {
+        self.enqueued.lock().unwrap().extend(records);
+        Ok(())
+    }
 }
 
 #[derive(Clone, Default)]
@@ -537,8 +622,7 @@ fn pool(pool_id: &str, tournament_id: &str) -> Pool {
         owner_user_id: id("owner-u"),
         name: NonEmptyString::new("Bolão".to_owned(), "pool.name").unwrap(),
         invite_code: InviteCode::new("ABCDEF".to_owned()).unwrap(),
-        visibility: Visibility::Private,
-        ranking_public: true,
+        join_requires_allowlist: false,
         prediction_lock_offset_minutes: 0,
         status: PoolStatus::Active,
         created_at: now(),

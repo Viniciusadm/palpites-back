@@ -1,9 +1,12 @@
 mod mapper;
+pub mod mysql_audit_logs;
+pub mod mysql_device_tokens;
 pub mod mysql_files;
 pub mod mysql_jobs;
 pub mod mysql_matches;
 pub mod mysql_notification_preferences;
 pub mod mysql_notifications;
+pub mod mysql_pool_email_allowlist;
 pub mod mysql_pool_members;
 pub mod mysql_pools;
 pub mod mysql_predictions;

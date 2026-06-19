@@ -19,7 +19,6 @@ use palpites_back::application::results::{
 use palpites_back::domain::matches::{Match, MatchStatus};
 use palpites_back::domain::pools::{
     MemberStatus, Pool, PoolMember, PoolRole, PoolScoringRule, PoolStatus, ScoringRuleKey,
-    Visibility,
 };
 use palpites_back::domain::predictions::{score, HitKind, ScoringRules};
 use palpites_back::domain::standings::{ranking, Standing};
@@ -184,10 +183,10 @@ async fn recompute_pool_rescoring_reflects_new_rules() {
     assert_eq!(points_for(&second, "p-a2"), 1);
 }
 
-// --- ranking_public gating -------------------------------------------------
+// --- ranking visibility gating ---------------------------------------------
 
 #[tokio::test]
-async fn ranking_is_forbidden_for_non_members_when_not_public() {
+async fn ranking_is_forbidden_for_non_members() {
     let standings = FakeStandings::default();
     standings.seed_standings("pool-a", vec![standing("pool-a", "m1", 10, 1)]);
 
@@ -198,36 +197,17 @@ async fn ranking_is_forbidden_for_non_members_when_not_public() {
         standings.clone(),
         FakeMatches::with_status(MatchStatus::Scheduled),
         FakeScoring::default(),
-        FakePools::with_ranking_public(false),
+        FakePools::default(),
         members,
         FixedClock::new("2026-06-18 18:00:00"),
         NoopNotifier,
     );
 
     let stranger = use_cases.ranking("pool-a", "stranger").await;
-    assert!(matches!(stranger, Err(AppError::Coded { code, .. }) if code == "ranking_not_public"));
+    assert!(matches!(stranger, Err(AppError::Coded { code, .. }) if code == "not_pool_member"));
 
     let member = use_cases.ranking("pool-a", "u1").await.unwrap();
     assert_eq!(member.standings.len(), 1);
-}
-
-#[tokio::test]
-async fn ranking_is_public_for_non_members_when_public() {
-    let standings = FakeStandings::default();
-    standings.seed_standings("pool-a", vec![standing("pool-a", "m1", 10, 1)]);
-
-    let use_cases = ResultUseCases::new(
-        standings,
-        FakeMatches::with_status(MatchStatus::Scheduled),
-        FakeScoring::default(),
-        FakePools::with_ranking_public(true),
-        FakeMembers::default(),
-        FixedClock::new("2026-06-18 18:00:00"),
-        NoopNotifier,
-    );
-
-    let result = use_cases.ranking("pool-a", "stranger").await.unwrap();
-    assert_eq!(result.standings.len(), 1);
 }
 
 // --- history aggregates ----------------------------------------------------
@@ -295,14 +275,14 @@ async fn member_predictions_hides_open_matches() {
         standings,
         FakeMatches::with_status(MatchStatus::Scheduled),
         FakeScoring::default(),
-        FakePools::with_ranking_public(true),
+        FakePools::default(),
         members,
         FixedClock::new("2026-06-18 11:55:00"),
         NoopNotifier,
     );
 
     let views = use_cases
-        .member_predictions("pool-a", "m1", "viewer")
+        .member_predictions("pool-a", "m1", "u1")
         .await
         .unwrap();
     let match_ids: Vec<&str> = views.iter().map(|view| view.match_id.as_str()).collect();
@@ -585,22 +565,8 @@ impl MatchRepository for FakeMatches {
     }
 }
 
-#[derive(Clone)]
-struct FakePools {
-    ranking_public: bool,
-}
-
-impl Default for FakePools {
-    fn default() -> Self {
-        Self { ranking_public: true }
-    }
-}
-
-impl FakePools {
-    fn with_ranking_public(ranking_public: bool) -> Self {
-        Self { ranking_public }
-    }
-}
+#[derive(Clone, Default)]
+struct FakePools;
 
 #[async_trait]
 impl PoolRepository for FakePools {
@@ -611,8 +577,7 @@ impl PoolRepository for FakePools {
             owner_user_id: id("owner-1"),
             name: NonEmptyString::new("Bolão".to_owned(), "pool.name").unwrap(),
             invite_code: InviteCode::new("ABC123".to_owned()).unwrap(),
-            visibility: Visibility::Private,
-            ranking_public: self.ranking_public,
+            join_requires_allowlist: false,
             prediction_lock_offset_minutes: 10,
             status: PoolStatus::Active,
             created_at: now(),

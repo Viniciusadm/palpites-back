@@ -5,9 +5,16 @@ use crate::application::jobs::{
     LiveMatchRepository, OutboundNotification, OutboundNotificationRepository,
     ReminderQueryRepository, RemindedRecipient,
 };
+use crate::application::notifications::{NewOutboxRecord, NotificationOutboxWriter};
+use crate::database::transaction::DatabaseTransaction;
 use crate::domain::matches::Match;
+use crate::domain::notifications::Channel;
 use crate::errors::AppError;
 use crate::infrastructure::repositories::mysql_matches::{map_match, MATCH_COLUMNS};
+
+/// Delivery is retried up to this many times before the outbox row is marked
+/// as permanently failed.
+const MAX_DELIVERY_ATTEMPTS: i32 = 5;
 
 #[derive(Clone)]
 pub struct MySqlJobsRepository {
@@ -64,15 +71,84 @@ impl ReminderQueryRepository for MySqlJobsRepository {
 
 #[async_trait]
 impl OutboundNotificationRepository for MySqlJobsRepository {
-    async fn list_pending(&self, _limit: u32) -> Result<Vec<OutboundNotification>, AppError> {
-        tracing::debug!(
-            "outbound notification delivery is not backed by storage yet; \
-             a durable email/push outbox is a future extension point"
-        );
-        Ok(Vec::new())
+    async fn list_pending(&self, limit: u32) -> Result<Vec<OutboundNotification>, AppError> {
+        let rows = sqlx::query(
+            "SELECT id, channel, user_id, title, body FROM notification_outbox \
+             WHERE status = 'pending' AND attempts < ? \
+             ORDER BY created_at LIMIT ?",
+        )
+        .bind(MAX_DELIVERY_ATTEMPTS)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                let channel: String = row.try_get("channel")?;
+                Ok(OutboundNotification {
+                    id: row.try_get("id")?,
+                    channel: Channel::parse(&channel)
+                        .map_err(|_| AppError::Internal("invalid outbox channel".to_owned()))?,
+                    user_id: row.try_get("user_id")?,
+                    title: row.try_get("title")?,
+                    body: row.try_get("body")?,
+                })
+            })
+            .collect()
     }
 
-    async fn mark_delivered(&self, _id: &str, _delivered_at: &str) -> Result<(), AppError> {
+    async fn mark_delivered(&self, id: &str, delivered_at: &str) -> Result<(), AppError> {
+        sqlx::query(
+            "UPDATE notification_outbox \
+             SET status = 'delivered', delivered_at = ? WHERE id = ?",
+        )
+        .bind(delivered_at)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn mark_failed(&self, id: &str, error: &str) -> Result<(), AppError> {
+        sqlx::query(
+            "UPDATE notification_outbox \
+             SET attempts = attempts + 1, last_error = ?, \
+                 status = IF(attempts + 1 >= ?, 'failed', 'pending') \
+             WHERE id = ?",
+        )
+        .bind(error)
+        .bind(MAX_DELIVERY_ATTEMPTS)
+        .bind(id)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+}
+
+#[async_trait]
+impl NotificationOutboxWriter for MySqlJobsRepository {
+    async fn enqueue_many(&self, records: Vec<NewOutboxRecord>) -> Result<(), AppError> {
+        if records.is_empty() {
+            return Ok(());
+        }
+        let mut tx: DatabaseTransaction = self.pool.begin().await?;
+        for record in &records {
+            sqlx::query(
+                "INSERT INTO notification_outbox \
+                 (id, channel, user_id, title, body, related_match_id, pool_id) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&record.id)
+            .bind(&record.channel)
+            .bind(&record.user_id)
+            .bind(&record.title)
+            .bind(&record.body)
+            .bind(&record.related_match_id)
+            .bind(&record.pool_id)
+            .execute(&mut *tx)
+            .await?;
+        }
+        tx.commit().await?;
         Ok(())
     }
 }

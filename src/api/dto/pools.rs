@@ -4,14 +4,13 @@ use crate::application::pools::{
     ChangeMemberRole, CreatePool, JoinOutcome, JoinPool, PoolMemberWithName, ScoringRuleInput,
     UpdatePoolSettings, UpdateScoringRules,
 };
-use crate::domain::pools::{Pool, PoolMember, PoolScoringRule};
+use crate::domain::pools::{Pool, PoolAllowedEmail, PoolMember, PoolScoringRule};
 
 #[derive(Debug, Deserialize)]
 pub struct CreatePoolRequest {
     pub name: String,
     pub tournament_id: String,
-    pub visibility: Option<String>,
-    pub ranking_public: Option<bool>,
+    pub join_requires_allowlist: Option<bool>,
     pub prediction_lock_offset_minutes: Option<u16>,
 }
 
@@ -20,8 +19,7 @@ impl From<CreatePoolRequest> for CreatePool {
         Self {
             name: value.name,
             tournament_id: value.tournament_id,
-            visibility: value.visibility,
-            ranking_public: value.ranking_public,
+            join_requires_allowlist: value.join_requires_allowlist,
             prediction_lock_offset_minutes: value.prediction_lock_offset_minutes,
         }
     }
@@ -30,8 +28,7 @@ impl From<CreatePoolRequest> for CreatePool {
 #[derive(Debug, Deserialize)]
 pub struct UpdatePoolRequest {
     pub name: String,
-    pub visibility: String,
-    pub ranking_public: bool,
+    pub join_requires_allowlist: bool,
     pub prediction_lock_offset_minutes: u16,
     pub status: String,
 }
@@ -40,12 +37,43 @@ impl From<UpdatePoolRequest> for UpdatePoolSettings {
     fn from(value: UpdatePoolRequest) -> Self {
         Self {
             name: value.name,
-            visibility: value.visibility,
-            ranking_public: value.ranking_public,
+            join_requires_allowlist: value.join_requires_allowlist,
             prediction_lock_offset_minutes: value.prediction_lock_offset_minutes,
             status: value.status,
         }
     }
+}
+
+#[derive(Debug, Deserialize)]
+pub struct AddAllowedEmailRequest {
+    pub email: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct AllowedEmailResponse {
+    pub id: String,
+    pub email: String,
+    pub created_at: String,
+}
+
+impl AllowedEmailResponse {
+    pub fn from_entry(entry: &PoolAllowedEmail) -> Self {
+        Self {
+            id: entry.id.as_str().to_owned(),
+            email: entry.email.as_str().to_owned(),
+            created_at: entry.created_at.as_str().to_owned(),
+        }
+    }
+}
+
+#[derive(Debug, Serialize)]
+pub struct AllowedEmailsListResponse {
+    pub emails: Vec<AllowedEmailResponse>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct DeletePoolRequest {
+    pub confirm_name: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -105,8 +133,7 @@ pub struct PoolResponse {
     pub owner_user_id: String,
     pub name: String,
     pub invite_code: String,
-    pub visibility: String,
-    pub ranking_public: bool,
+    pub join_requires_allowlist: bool,
     pub prediction_lock_offset_minutes: u16,
     pub status: String,
 }
@@ -119,8 +146,7 @@ impl PoolResponse {
             owner_user_id: pool.owner_user_id.as_str().to_owned(),
             name: pool.name.as_str().to_owned(),
             invite_code: pool.invite_code.as_str().to_owned(),
-            visibility: pool.visibility.as_str().to_owned(),
-            ranking_public: pool.ranking_public,
+            join_requires_allowlist: pool.join_requires_allowlist,
             prediction_lock_offset_minutes: pool.prediction_lock_offset_minutes,
             status: pool.status.as_str().to_owned(),
         }

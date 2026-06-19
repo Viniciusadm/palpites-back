@@ -17,7 +17,7 @@ use palpites_back::application::shared::{Notifier, ReminderRecipient};
 use palpites_back::domain::matches::{Match, MatchStatus};
 use palpites_back::domain::notifications::Channel;
 use palpites_back::domain::pools::{
-    MemberStatus, Pool, PoolMember, PoolRole, PoolStatus, Visibility,
+    MemberStatus, Pool, PoolMember, PoolRole, PoolStatus,
 };
 use palpites_back::domain::predictions::Prediction;
 use palpites_back::domain::{DomainId, InviteCode, NonEmptyString, Score, UtcDateTime};
@@ -109,25 +109,43 @@ async fn does_not_remind_when_prediction_window_is_locked() {
 
 #[tokio::test]
 async fn dispatch_delivers_and_marks_pending_notifications() {
-    let email = RecordingSender::new(Channel::Email);
     let push = RecordingSender::new(Channel::Push);
     let outbound = FakeOutbound::new(vec![
-        outbound("out-1", Channel::Email),
+        outbound("out-1", Channel::Push),
         outbound("out-2", Channel::Push),
     ]);
     let runner = DispatchNotifications::new(
         outbound.clone(),
-        vec![Box::new(email.clone()), Box::new(push.clone())],
+        vec![Box::new(push.clone())],
         FixedClock::new(NOW),
     );
 
     let summary = runner.run(100).await.unwrap();
 
     assert_eq!(summary.delivered, 2);
-    assert_eq!(*email.sent.lock().unwrap(), vec!["out-1".to_owned()]);
-    assert_eq!(*push.sent.lock().unwrap(), vec!["out-2".to_owned()]);
+    assert_eq!(
+        *push.sent.lock().unwrap(),
+        vec!["out-1".to_owned(), "out-2".to_owned()]
+    );
     let delivered = outbound.delivered.lock().unwrap();
     assert_eq!(*delivered, vec!["out-1".to_owned(), "out-2".to_owned()]);
+    assert!(outbound.failed.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn dispatch_marks_failed_when_sender_errors() {
+    let outbound = FakeOutbound::new(vec![outbound("out-1", Channel::Push)]);
+    let runner = DispatchNotifications::new(
+        outbound.clone(),
+        vec![Box::new(FailingSender::new(Channel::Push))],
+        FixedClock::new(NOW),
+    );
+
+    let summary = runner.run(100).await.unwrap();
+
+    assert_eq!(summary.delivered, 0);
+    assert!(outbound.delivered.lock().unwrap().is_empty());
+    assert_eq!(*outbound.failed.lock().unwrap(), vec!["out-1".to_owned()]);
 }
 
 // --- fakes -----------------------------------------------------------------
@@ -329,6 +347,7 @@ impl Notifier for RecordingNotifier {
 struct FakeOutbound {
     pending: Vec<OutboundNotification>,
     delivered: Arc<Mutex<Vec<String>>>,
+    failed: Arc<Mutex<Vec<String>>>,
 }
 
 impl FakeOutbound {
@@ -336,6 +355,7 @@ impl FakeOutbound {
         Self {
             pending,
             delivered: Arc::default(),
+            failed: Arc::default(),
         }
     }
 }
@@ -348,6 +368,31 @@ impl OutboundNotificationRepository for FakeOutbound {
     async fn mark_delivered(&self, id: &str, _delivered_at: &str) -> Result<(), AppError> {
         self.delivered.lock().unwrap().push(id.to_owned());
         Ok(())
+    }
+    async fn mark_failed(&self, id: &str, _error: &str) -> Result<(), AppError> {
+        self.failed.lock().unwrap().push(id.to_owned());
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+struct FailingSender {
+    channel: Channel,
+}
+
+impl FailingSender {
+    fn new(channel: Channel) -> Self {
+        Self { channel }
+    }
+}
+
+#[async_trait]
+impl NotificationSender for FailingSender {
+    fn channel(&self) -> Channel {
+        self.channel
+    }
+    async fn send(&self, _notification: &OutboundNotification) -> Result<(), AppError> {
+        Err(AppError::Internal("boom".to_owned()))
     }
 }
 
@@ -403,8 +448,7 @@ fn pool(lock_offset_minutes: u16) -> Pool {
         owner_user_id: id("owner-1"),
         name: NonEmptyString::new("Pool".to_owned(), "name").unwrap(),
         invite_code: InviteCode::new("CODE123".to_owned()).unwrap(),
-        visibility: Visibility::Private,
-        ranking_public: true,
+        join_requires_allowlist: false,
         prediction_lock_offset_minutes: lock_offset_minutes,
         status: PoolStatus::Active,
         created_at: now(),

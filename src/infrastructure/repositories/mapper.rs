@@ -2,7 +2,7 @@ use chrono::{NaiveDate, NaiveDateTime, SecondsFormat};
 
 use crate::domain::matches::MatchStatus;
 use crate::domain::notifications::{Channel, NotificationType};
-use crate::domain::pools::{MemberStatus, PoolRole, PoolStatus, ScoringRuleKey, Visibility};
+use crate::domain::pools::{MemberStatus, PoolRole, PoolStatus, ScoringRuleKey};
 use crate::domain::tournaments::{StageKind, TournamentStatus};
 use crate::domain::users::UserRole;
 use crate::domain::{
@@ -47,10 +47,6 @@ pub fn invite_code(value: String) -> Result<InviteCode, AppError> {
 
 pub fn pool_role(value: String) -> Result<PoolRole, AppError> {
     Ok(PoolRole::parse(&value)?)
-}
-
-pub fn visibility(value: String) -> Result<Visibility, AppError> {
-    Ok(Visibility::parse(&value)?)
 }
 
 pub fn pool_status(value: String) -> Result<PoolStatus, AppError> {

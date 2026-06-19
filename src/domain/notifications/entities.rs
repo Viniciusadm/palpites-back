@@ -42,7 +42,6 @@ impl NotificationType {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Channel {
     InApp,
-    Email,
     Push,
 }
 
@@ -50,7 +49,6 @@ impl Channel {
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::InApp => "in_app",
-            Self::Email => "email",
             Self::Push => "push",
         }
     }
@@ -58,7 +56,6 @@ impl Channel {
     pub fn parse(value: &str) -> Result<Self, DomainValidationError> {
         match value {
             "in_app" => Ok(Self::InApp),
-            "email" => Ok(Self::Email),
             "push" => Ok(Self::Push),
             _ => Err(DomainValidationError::Invalid("channel")),
         }

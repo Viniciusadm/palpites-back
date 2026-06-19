@@ -36,6 +36,10 @@ pub trait ReminderQueryRepository: Send + Sync {
 pub trait OutboundNotificationRepository: Send + Sync {
     async fn list_pending(&self, limit: u32) -> Result<Vec<OutboundNotification>, AppError>;
     async fn mark_delivered(&self, id: &str, delivered_at: &str) -> Result<(), AppError>;
+    /// Records a failed delivery attempt. Implementations increment the attempt
+    /// counter and persist the error, keeping the record pending for retry until
+    /// a maximum number of attempts is reached.
+    async fn mark_failed(&self, id: &str, error: &str) -> Result<(), AppError>;
 }
 
 #[async_trait]

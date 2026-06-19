@@ -3,25 +3,34 @@ mod support;
 use std::sync::{Arc, Mutex};
 
 use async_trait::async_trait;
+use palpites_back::application::auth::{RegisterUserRecord, UserRepository};
 use palpites_back::application::pools::{
-    ChangeMemberRole, CreatePool, CreatePoolSeed, JoinPool, MembershipUseCases, NewMemberRecord,
-    NewScoringRuleRecord, PoolMemberRepository, PoolMemberWithName, PoolRepository, PoolUseCases,
-    ScoringRuleInput,
+    ChangeMemberRole, CreatePool, CreatePoolSeed, JoinPool, MembershipUseCases,
+    NewAllowedEmailRecord, NewMemberRecord, NewScoringRuleRecord, PoolEmailAllowlistRepository,
+    PoolMemberRepository, PoolMemberWithName, PoolRepository, PoolUseCases, ScoringRuleInput,
     ScoringRuleRepository, ScoringRuleUseCases, UpdatePoolRecord, UpdatePoolSettings,
     UpdateScoringRules,
 };
 use palpites_back::domain::pools::{
-    MemberStatus, Pool, PoolMember, PoolRole, PoolScoringRule, PoolStatus, ScoringRuleKey,
-    Visibility,
+    MemberStatus, Pool, PoolAllowedEmail, PoolMember, PoolRole, PoolScoringRule, PoolStatus,
+    ScoringRuleKey,
 };
-use palpites_back::domain::{DomainId, InviteCode, NonEmptyString, UtcDateTime};
+use palpites_back::domain::users::{User, UserRole};
+use palpites_back::domain::{DomainId, Email, InviteCode, NonEmptyString, UtcDateTime};
 use palpites_back::errors::AppError;
 use support::{FixedClock, NoopNotifier};
 
 #[tokio::test]
 async fn create_seeds_rules_owner_and_invite_code() {
     let pools = FakePools::with_tournament("active");
-    let use_cases = PoolUseCases::new(pools.clone(), FakeMembers::default(), clock(), NoopNotifier);
+    let use_cases = PoolUseCases::new(
+        pools.clone(),
+        FakeMembers::default(),
+        clock(),
+        NoopNotifier,
+        FakeUsers::default(),
+        FakeAllowlist::default(),
+    );
 
     let pool = use_cases
         .create(
@@ -29,8 +38,7 @@ async fn create_seeds_rules_owner_and_invite_code() {
             CreatePool {
                 name: "Bolão da Copa".to_owned(),
                 tournament_id: "tournament-1".to_owned(),
-                visibility: None,
-                ranking_public: None,
+                join_requires_allowlist: None,
                 prediction_lock_offset_minutes: None,
             },
         )
@@ -71,6 +79,8 @@ async fn create_rejects_archived_tournament() {
         FakeMembers::default(),
         clock(),
         NoopNotifier,
+        FakeUsers::default(),
+        FakeAllowlist::default(),
     );
 
     let result = use_cases
@@ -79,8 +89,7 @@ async fn create_rejects_archived_tournament() {
             CreatePool {
                 name: "Bolão".to_owned(),
                 tournament_id: "tournament-1".to_owned(),
-                visibility: None,
-                ranking_public: None,
+                join_requires_allowlist: None,
                 prediction_lock_offset_minutes: None,
             },
         )
@@ -99,7 +108,14 @@ async fn create_rejects_archived_tournament() {
 async fn join_by_code_adds_active_member() {
     let pools = FakePools::with_existing_pool(pool_with_code("pool-1", "ABCDEF"));
     let members = FakeMembers::default();
-    let use_cases = PoolUseCases::new(pools, members.clone(), clock(), NoopNotifier);
+    let use_cases = PoolUseCases::new(
+        pools,
+        members.clone(),
+        clock(),
+        NoopNotifier,
+        FakeUsers::default(),
+        FakeAllowlist::default(),
+    );
 
     let outcome = use_cases
         .join_by_code(
@@ -123,7 +139,14 @@ async fn duplicate_join_is_idempotent() {
     let pools = FakePools::with_existing_pool(pool_with_code("pool-1", "ABCDEF"));
     let members = FakeMembers::default()
         .with_membership(member("m-1", "pool-1", "user-9", PoolRole::Member, MemberStatus::Active));
-    let use_cases = PoolUseCases::new(pools, members.clone(), clock(), NoopNotifier);
+    let use_cases = PoolUseCases::new(
+        pools,
+        members.clone(),
+        clock(),
+        NoopNotifier,
+        FakeUsers::default(),
+        FakeAllowlist::default(),
+    );
 
     let outcome = use_cases
         .join_by_code(
@@ -141,11 +164,86 @@ async fn duplicate_join_is_idempotent() {
 }
 
 #[tokio::test]
+async fn join_blocked_when_email_not_in_allowlist() {
+    let pools = FakePools::with_existing_pool(pool_requiring_allowlist("pool-1", "ABCDEF"));
+    let members = FakeMembers::default();
+    let users = FakeUsers::default().with_user("user-9", "outsider@example.com");
+    let allowlist = FakeAllowlist::default().with_email("pool-1", "allowed@example.com");
+    let use_cases = PoolUseCases::new(pools, members.clone(), clock(), NoopNotifier, users, allowlist);
+
+    let result = use_cases
+        .join_by_code(
+            "user-9",
+            JoinPool {
+                invite_code: "abcdef".to_owned(),
+            },
+        )
+        .await;
+
+    assert!(matches!(
+        result,
+        Err(AppError::Coded {
+            code: "email_not_allowed",
+            ..
+        })
+    ));
+    assert_eq!(members.created.lock().unwrap().len(), 0);
+}
+
+#[tokio::test]
+async fn join_allowed_when_email_in_allowlist() {
+    let pools = FakePools::with_existing_pool(pool_requiring_allowlist("pool-1", "ABCDEF"));
+    let members = FakeMembers::default();
+    let users = FakeUsers::default().with_user("user-9", "Allowed@Example.com");
+    let allowlist = FakeAllowlist::default().with_email("pool-1", "allowed@example.com");
+    let use_cases = PoolUseCases::new(pools, members.clone(), clock(), NoopNotifier, users, allowlist);
+
+    let outcome = use_cases
+        .join_by_code(
+            "user-9",
+            JoinPool {
+                invite_code: "abcdef".to_owned(),
+            },
+        )
+        .await
+        .unwrap();
+
+    assert!(!outcome.already_member);
+    assert_eq!(outcome.member.user_id.as_str(), "user-9");
+    assert_eq!(members.created.lock().unwrap().len(), 1);
+}
+
+#[tokio::test]
+async fn member_role_cannot_manage_allowlist() {
+    let use_cases = PoolUseCases::new(
+        FakePools::default(),
+        FakeMembers::default(),
+        clock(),
+        NoopNotifier,
+        FakeUsers::default(),
+        FakeAllowlist::default(),
+    );
+
+    let result = use_cases
+        .add_allowed_email("pool-1", PoolRole::Member, "user-9", "x@example.com".to_owned())
+        .await;
+
+    assert!(matches!(result, Err(AppError::Forbidden(_))));
+}
+
+#[tokio::test]
 async fn last_owner_cannot_leave() {
     let members = FakeMembers::default()
         .with_membership(member("m-1", "pool-1", "owner-1", PoolRole::Owner, MemberStatus::Active))
         .with_active_owners(1);
-    let use_cases = PoolUseCases::new(FakePools::default(), members, clock(), NoopNotifier);
+    let use_cases = PoolUseCases::new(
+        FakePools::default(),
+        members,
+        clock(),
+        NoopNotifier,
+        FakeUsers::default(),
+        FakeAllowlist::default(),
+    );
 
     let result = use_cases.leave("pool-1", "owner-1").await;
 
@@ -213,7 +311,14 @@ async fn cannot_demote_last_owner() {
 
 #[tokio::test]
 async fn member_role_cannot_update_settings() {
-    let use_cases = PoolUseCases::new(FakePools::default(), FakeMembers::default(), clock(), NoopNotifier);
+    let use_cases = PoolUseCases::new(
+        FakePools::default(),
+        FakeMembers::default(),
+        clock(),
+        NoopNotifier,
+        FakeUsers::default(),
+        FakeAllowlist::default(),
+    );
 
     let result = use_cases
         .update_settings(
@@ -221,8 +326,7 @@ async fn member_role_cannot_update_settings() {
             PoolRole::Member,
             UpdatePoolSettings {
                 name: "Renamed".to_owned(),
-                visibility: "private".to_owned(),
-                ranking_public: true,
+                join_requires_allowlist: false,
                 prediction_lock_offset_minutes: 0,
                 status: "active".to_owned(),
             },
@@ -496,6 +600,108 @@ impl ScoringRuleRepository for FakeScoring {
     }
 }
 
+#[derive(Clone, Default)]
+struct FakeUsers {
+    users: Arc<Mutex<Vec<User>>>,
+}
+
+impl FakeUsers {
+    fn with_user(self, user_id: &str, email: &str) -> Self {
+        self.users.lock().unwrap().push(user_record(user_id, email));
+        self
+    }
+}
+
+#[async_trait]
+impl UserRepository for FakeUsers {
+    async fn find_by_id(&self, user_id: &str) -> Result<Option<User>, AppError> {
+        Ok(self
+            .users
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|user| user.id.as_str() == user_id)
+            .cloned())
+    }
+
+    async fn find_by_email(&self, email: &str) -> Result<Option<User>, AppError> {
+        Ok(self
+            .users
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|user| user.email.as_str() == email)
+            .cloned())
+    }
+
+    async fn register_user(&self, _record: RegisterUserRecord) -> Result<(), AppError> {
+        Ok(())
+    }
+}
+
+#[derive(Clone, Default)]
+struct FakeAllowlist {
+    entries: Arc<Mutex<Vec<PoolAllowedEmail>>>,
+}
+
+impl FakeAllowlist {
+    fn with_email(self, pool_id: &str, email: &str) -> Self {
+        let entry_id = format!("ae-{}", self.entries.lock().unwrap().len());
+        self.entries
+            .lock()
+            .unwrap()
+            .push(allowed_email(&entry_id, pool_id, email));
+        self
+    }
+}
+
+#[async_trait]
+impl PoolEmailAllowlistRepository for FakeAllowlist {
+    async fn list_for_pool(&self, pool_id: &str) -> Result<Vec<PoolAllowedEmail>, AppError> {
+        Ok(self
+            .entries
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|entry| entry.pool_id.as_str() == pool_id)
+            .cloned()
+            .collect())
+    }
+
+    async fn find_by_id(&self, entry_id: &str) -> Result<Option<PoolAllowedEmail>, AppError> {
+        Ok(self
+            .entries
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|entry| entry.id.as_str() == entry_id)
+            .cloned())
+    }
+
+    async fn is_email_allowed(&self, pool_id: &str, email: &str) -> Result<bool, AppError> {
+        Ok(self
+            .entries
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|entry| entry.pool_id.as_str() == pool_id && entry.email.as_str() == email))
+    }
+
+    async fn add(&self, record: NewAllowedEmailRecord) -> Result<PoolAllowedEmail, AppError> {
+        let entry = allowed_email(&record.id, &record.pool_id, &record.email);
+        self.entries.lock().unwrap().push(entry.clone());
+        Ok(entry)
+    }
+
+    async fn remove(&self, pool_id: &str, entry_id: &str) -> Result<(), AppError> {
+        self.entries
+            .lock()
+            .unwrap()
+            .retain(|entry| !(entry.pool_id.as_str() == pool_id && entry.id.as_str() == entry_id));
+        Ok(())
+    }
+}
+
 fn clock() -> FixedClock {
     FixedClock::new("2026-06-18 12:00:00")
 }
@@ -515,12 +721,42 @@ fn pool_with_code(pool_id: &str, code: &str) -> Pool {
         owner_user_id: id("owner-1"),
         name: NonEmptyString::new("Bolão".to_owned(), "pool.name").unwrap(),
         invite_code: InviteCode::new(code.to_owned()).unwrap(),
-        visibility: Visibility::Private,
-        ranking_public: true,
+        join_requires_allowlist: false,
         prediction_lock_offset_minutes: 0,
         status: PoolStatus::Active,
         created_at: now(),
         updated_at: now(),
+    }
+}
+
+fn pool_requiring_allowlist(pool_id: &str, code: &str) -> Pool {
+    let mut pool = pool_with_code(pool_id, code);
+    pool.join_requires_allowlist = true;
+    pool
+}
+
+fn user_record(user_id: &str, email: &str) -> User {
+    User {
+        id: id(user_id),
+        email: Email::new(email.to_owned()).unwrap(),
+        password_hash: NonEmptyString::new("hash".to_owned(), "user.password_hash").unwrap(),
+        display_name: NonEmptyString::new("Tester".to_owned(), "user.display_name").unwrap(),
+        role: UserRole::Member,
+        avatar_file_id: None,
+        is_active: true,
+        last_login_at: None,
+        created_at: now(),
+        updated_at: now(),
+    }
+}
+
+fn allowed_email(entry_id: &str, pool_id: &str, email: &str) -> PoolAllowedEmail {
+    PoolAllowedEmail {
+        id: id(entry_id),
+        pool_id: id(pool_id),
+        email: Email::new(email.to_owned()).unwrap(),
+        added_by_user_id: id("owner-1"),
+        created_at: now(),
     }
 }
 
@@ -531,8 +767,7 @@ fn pool_from_seed(seed: &CreatePoolSeed) -> Pool {
         owner_user_id: id(&seed.pool.owner_user_id),
         name: NonEmptyString::new(seed.pool.name.clone(), "pool.name").unwrap(),
         invite_code: InviteCode::new(seed.pool.invite_code.clone()).unwrap(),
-        visibility: Visibility::parse(&seed.pool.visibility).unwrap(),
-        ranking_public: seed.pool.ranking_public,
+        join_requires_allowlist: seed.pool.join_requires_allowlist,
         prediction_lock_offset_minutes: seed.pool.prediction_lock_offset_minutes,
         status: PoolStatus::parse(&seed.pool.status).unwrap(),
         created_at: now(),

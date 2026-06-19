@@ -1,19 +1,23 @@
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
-use axum::routing::{get, patch};
+use axum::routing::{delete, get, patch, post};
 use axum::{Json, Router};
 use sqlx::MySqlPool;
+use uuid::Uuid;
 
 use crate::api::dto::notifications::{
     NotificationFilterQuery, NotificationPreferenceResponse, NotificationPreferencesListResponse,
-    NotificationResponse, NotificationsListResponse, UpdatePreferencesRequest,
+    NotificationResponse, NotificationsListResponse, RegisterDeviceRequest, UpdatePreferencesRequest,
 };
 use crate::api::extractors::{AuthenticatedUser, PoolMember};
 use crate::api::routes::v1::mod_helpers::app_error;
 use crate::api::state::AppState;
-use crate::application::notifications::NotificationUseCases;
+use crate::application::notifications::{DeviceTokenRepository, NewDeviceToken, NotificationUseCases};
+use crate::errors::AppError;
 use crate::infrastructure::clock::SystemClock;
+use crate::infrastructure::repositories::mysql_device_tokens::MySqlDeviceTokenRepository;
+use crate::infrastructure::repositories::mysql_jobs::MySqlJobsRepository;
 use crate::infrastructure::repositories::mysql_notification_preferences::MySqlNotificationPreferenceRepository;
 use crate::infrastructure::repositories::mysql_notifications::MySqlNotificationRepository;
 use crate::infrastructure::repositories::mysql_pool_members::MySqlPoolMemberRepository;
@@ -24,6 +28,7 @@ pub type NotifierImpl = NotificationUseCases<
     MySqlNotificationPreferenceRepository,
     MySqlPoolRepository,
     MySqlPoolMemberRepository,
+    MySqlJobsRepository,
     SystemClock,
 >;
 
@@ -32,7 +37,8 @@ pub fn notifier(db: MySqlPool) -> NotifierImpl {
         MySqlNotificationRepository::new(db.clone()),
         MySqlNotificationPreferenceRepository::new(db.clone()),
         MySqlPoolRepository::new(db.clone()),
-        MySqlPoolMemberRepository::new(db),
+        MySqlPoolMemberRepository::new(db.clone()),
+        MySqlJobsRepository::new(db),
         SystemClock,
     )
 }
@@ -42,6 +48,8 @@ pub fn router() -> Router<AppState> {
         .route("/notifications", get(list))
         .route("/notifications/read-all", patch(read_all))
         .route("/notifications/:id/read", patch(mark_read))
+        .route("/notifications/devices", post(register_device))
+        .route("/notifications/devices/:token", delete(unregister_device))
         .route(
             "/pools/:id/notification-preferences",
             get(get_preferences).put(update_preferences),
@@ -98,6 +106,58 @@ async fn read_all(State(state): State<AppState>, auth: AuthenticatedUser) -> Res
     };
 
     match notifier(db).mark_all_read(&auth.user_id).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => app_error(error),
+    }
+}
+
+async fn register_device(
+    State(state): State<AppState>,
+    auth: AuthenticatedUser,
+    Json(request): Json<RegisterDeviceRequest>,
+) -> Response {
+    let db = match state.db() {
+        Ok(db) => db,
+        Err(error) => return app_error(error),
+    };
+
+    let token = request.token.trim();
+    if token.is_empty() {
+        return app_error(AppError::validation_code(
+            "device_token_required",
+            "a device token is required",
+        ));
+    }
+
+    let repo = MySqlDeviceTokenRepository::new(db);
+    let record = NewDeviceToken {
+        id: Uuid::new_v4().to_string(),
+        user_id: auth.user_id.clone(),
+        token: token.to_owned(),
+        platform: request
+            .platform
+            .map(|value| value.trim().to_owned())
+            .filter(|value| !value.is_empty())
+            .unwrap_or_else(|| "web".to_owned()),
+    };
+
+    match repo.upsert(record).await {
+        Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => app_error(error),
+    }
+}
+
+async fn unregister_device(
+    State(state): State<AppState>,
+    _auth: AuthenticatedUser,
+    Path(token): Path<String>,
+) -> Response {
+    let db = match state.db() {
+        Ok(db) => db,
+        Err(error) => return app_error(error),
+    };
+
+    match MySqlDeviceTokenRepository::new(db).remove(&token).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
         Err(error) => app_error(error),
     }
