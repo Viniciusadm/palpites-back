@@ -258,6 +258,74 @@ async fn new_match_notifies_active_members_of_tournament_pools() {
 }
 
 #[tokio::test]
+async fn dispatch_deduplicates_per_user_across_pools() {
+    let notifications = FakeNotifications::default();
+    let outbox = FakeOutbox::default();
+    let pools = FakePools::with(vec![
+        pool("pool-a", TOURNAMENT_ID),
+        pool("pool-b", TOURNAMENT_ID),
+    ]);
+    // The fake returns the same members for every pool, so this user belongs to both.
+    let members = FakeMembers::with(vec![member(
+        "m-1",
+        "user-1",
+        PoolRole::Member,
+        MemberStatus::Active,
+    )]);
+    let use_cases = build_with_outbox(
+        notifications.clone(),
+        FakePreferences::default(),
+        pools,
+        members,
+        outbox.clone(),
+    );
+
+    use_cases.new_match(&match_row("match-1", TOURNAMENT_ID)).await.unwrap();
+
+    let rows = notifications.rows.lock().unwrap();
+    assert_eq!(rows.len(), 1, "a user in two pools must get a single in-app notification");
+    assert_eq!(rows[0].user_id.as_str(), "user-1");
+    assert!(rows[0].pool_id.is_none(), "deduplicated notification is account-level");
+
+    let enqueued = outbox.enqueued.lock().unwrap();
+    assert_eq!(enqueued.len(), 1, "a user in two pools must get a single push");
+    assert_eq!(enqueued[0].user_id, "user-1");
+}
+
+#[tokio::test]
+async fn dispatch_enables_channel_if_any_pool_enables_it() {
+    let outbox = FakeOutbox::default();
+    let pools = FakePools::with(vec![
+        pool("pool-a", TOURNAMENT_ID),
+        pool("pool-b", TOURNAMENT_ID),
+    ]);
+    let members = FakeMembers::with(vec![member(
+        "m-1",
+        "user-1",
+        PoolRole::Member,
+        MemberStatus::Active,
+    )]);
+    // Push disabled in pool-a but enabled in pool-b -> the OR aggregate yields one push.
+    let preferences = FakePreferences::with(vec![
+        pref("user-1", Some("pool-a"), NotificationType::NewMatch, Channel::Push, false),
+        pref("user-1", Some("pool-b"), NotificationType::NewMatch, Channel::Push, true),
+    ]);
+    let use_cases = build_with_outbox(
+        FakeNotifications::default(),
+        preferences,
+        pools,
+        members,
+        outbox.clone(),
+    );
+
+    use_cases.new_match(&match_row("match-1", TOURNAMENT_ID)).await.unwrap();
+
+    let enqueued = outbox.enqueued.lock().unwrap();
+    assert_eq!(enqueued.len(), 1);
+    assert_eq!(enqueued[0].user_id, "user-1");
+}
+
+#[tokio::test]
 async fn mark_read_sets_read_at_for_owner() {
     let notifications = FakeNotifications::default();
     notifications.seed(notification("n-1", "user-1"));

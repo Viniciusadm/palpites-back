@@ -89,7 +89,7 @@ impl NotificationPreferenceRepository for MySqlNotificationPreferenceRepository 
                 sqlx::query(
                     "INSERT INTO notification_preferences \
                      (id, user_id, pool_id, type, channel, enabled) \
-                     VALUES (?, NULL, ?, ?, ?, ?)",
+                     VALUES (?, ?, NULL, ?, ?, ?)",
                 )
                 .bind(&record.id)
                 .bind(&record.user_id)

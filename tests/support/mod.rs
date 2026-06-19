@@ -40,10 +40,6 @@ impl Notifier for NoopNotifier {
         Ok(())
     }
 
-    async fn ranking_update(&self, _pool_ids: &[String]) -> Result<(), AppError> {
-        Ok(())
-    }
-
     async fn prediction_reminder(
         &self,
         _match_id: &str,

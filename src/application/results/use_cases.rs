@@ -120,7 +120,6 @@ where
             .ok_or_else(|| AppError::Internal("match disappeared after result entry".to_owned()))?;
 
         self.notifier.match_result(&game, &pool_ids).await?;
-        self.notifier.ranking_update(&pool_ids).await?;
         Ok(game)
     }
 

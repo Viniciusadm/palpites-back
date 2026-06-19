@@ -19,7 +19,6 @@ pub trait Notifier: Send + Sync {
     async fn new_match(&self, game: &Match) -> Result<(), AppError>;
     async fn member_joined(&self, pool_id: &str, joined_user_id: &str) -> Result<(), AppError>;
     async fn match_result(&self, game: &Match, pool_ids: &[String]) -> Result<(), AppError>;
-    async fn ranking_update(&self, pool_ids: &[String]) -> Result<(), AppError>;
     async fn prediction_reminder(
         &self,
         match_id: &str,

@@ -171,8 +171,9 @@ where
     ) -> Result<(), AppError> {
         let (title, body) = copy_for(notification_type);
         let mut cache: HashMap<String, Vec<NotificationPreference>> = HashMap::new();
-        let mut records = Vec::new();
-        let mut outbox_records = Vec::new();
+
+        let mut order: Vec<String> = Vec::new();
+        let mut enabled_by_user: HashMap<String, (bool, bool)> = HashMap::new();
 
         for recipient in recipients {
             if !cache.contains_key(&recipient.user_id) {
@@ -186,11 +187,25 @@ where
             let push_enabled =
                 resolve_enabled(prefs, &recipient.pool_id, notification_type, Channel::Push);
 
+            let entry = enabled_by_user.entry(recipient.user_id.clone()).or_insert_with(|| {
+                order.push(recipient.user_id.clone());
+                (false, false)
+            });
+            entry.0 |= in_app_enabled;
+            entry.1 |= push_enabled;
+        }
+
+        let mut records = Vec::new();
+        let mut outbox_records = Vec::new();
+
+        for user_id in order {
+            let (in_app_enabled, push_enabled) = enabled_by_user[&user_id];
+
             if in_app_enabled {
                 records.push(NewNotificationRecord {
                     id: new_id(),
-                    user_id: recipient.user_id.clone(),
-                    pool_id: Some(recipient.pool_id.clone()),
+                    user_id: user_id.clone(),
+                    pool_id: None,
                     notification_type: notification_type.as_str().to_owned(),
                     title: title.to_owned(),
                     body: body.to_owned(),
@@ -202,11 +217,11 @@ where
                 outbox_records.push(NewOutboxRecord {
                     id: new_id(),
                     channel: Channel::Push.as_str().to_owned(),
-                    user_id: recipient.user_id,
+                    user_id,
                     title: title.to_owned(),
                     body: body.to_owned(),
                     related_match_id: related_match_id.map(ToOwned::to_owned),
-                    pool_id: Some(recipient.pool_id),
+                    pool_id: None,
                 });
             }
         }
@@ -279,15 +294,6 @@ where
             recipients.extend(self.active_members(pool_id).await?);
         }
         self.dispatch(recipients, NotificationType::MatchResult, Some(game.id.as_str()))
-            .await
-    }
-
-    async fn ranking_update(&self, pool_ids: &[String]) -> Result<(), AppError> {
-        let mut recipients = Vec::new();
-        for pool_id in pool_ids {
-            recipients.extend(self.active_members(pool_id).await?);
-        }
-        self.dispatch(recipients, NotificationType::RankingUpdate, None)
             .await
     }
 

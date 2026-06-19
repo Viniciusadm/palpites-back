@@ -327,9 +327,6 @@ impl Notifier for RecordingNotifier {
     async fn match_result(&self, _game: &Match, _pool_ids: &[String]) -> Result<(), AppError> {
         Ok(())
     }
-    async fn ranking_update(&self, _pool_ids: &[String]) -> Result<(), AppError> {
-        Ok(())
-    }
     async fn prediction_reminder(
         &self,
         match_id: &str,
