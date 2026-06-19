@@ -637,6 +637,14 @@ impl UserRepository for FakeUsers {
     async fn register_user(&self, _record: RegisterUserRecord) -> Result<(), AppError> {
         Ok(())
     }
+
+    async fn set_sync_predictions_across_pools(
+        &self,
+        _user_id: &str,
+        _value: bool,
+    ) -> Result<(), AppError> {
+        Ok(())
+    }
 }
 
 #[derive(Clone, Default)]
@@ -743,6 +751,7 @@ fn user_record(user_id: &str, email: &str) -> User {
         display_name: NonEmptyString::new("Tester".to_owned(), "user.display_name").unwrap(),
         role: UserRole::Member,
         avatar_file_id: None,
+        sync_predictions_across_pools: true,
         is_active: true,
         last_login_at: None,
         created_at: now(),

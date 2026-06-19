@@ -16,6 +16,11 @@ pub trait UserRepository: Send + Sync {
     async fn find_by_id(&self, id: &str) -> Result<Option<User>, AppError>;
     async fn find_by_email(&self, email: &str) -> Result<Option<User>, AppError>;
     async fn register_user(&self, record: RegisterUserRecord) -> Result<(), AppError>;
+    async fn set_sync_predictions_across_pools(
+        &self,
+        user_id: &str,
+        value: bool,
+    ) -> Result<(), AppError>;
 }
 
 pub trait PasswordHasher: Send + Sync {

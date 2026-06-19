@@ -151,6 +151,14 @@ impl UserRepository for FakeUsers {
         self.registered.lock().unwrap().push(record);
         Ok(())
     }
+
+    async fn set_sync_predictions_across_pools(
+        &self,
+        _user_id: &str,
+        _value: bool,
+    ) -> Result<(), AppError> {
+        Ok(())
+    }
 }
 
 struct FakePasswords;
@@ -181,6 +189,7 @@ fn fake_user() -> User {
         display_name: NonEmptyString::new("Host User".to_owned(), "display_name").unwrap(),
         role: UserRole::Member,
         avatar_file_id: None,
+        sync_predictions_across_pools: true,
         is_active: true,
         last_login_at: None,
         created_at: now(),

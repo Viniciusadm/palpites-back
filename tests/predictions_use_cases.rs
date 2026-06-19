@@ -30,6 +30,10 @@ const USER_ID: &str = "user-1";
 const MEMBER_ID: &str = "member-1";
 const KICKOFF: &str = "2026-06-18 12:00:00";
 const LOCK_OFFSET: u16 = 10;
+const POOL_SAME_OPEN: &str = "pool-2";
+const POOL_OTHER_TOURNAMENT: &str = "pool-3";
+const POOL_SAME_LOCKED: &str = "pool-4";
+const TOURNAMENT_2: &str = "tournament-2";
 
 #[tokio::test]
 async fn upsert_before_lock_persists_prediction() {
@@ -37,7 +41,7 @@ async fn upsert_before_lock_persists_prediction() {
     let use_cases = build(predictions.clone(), member(MemberStatus::Active), clock("2026-06-18 11:00:00"));
 
     let prediction = use_cases
-        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 2, away_score: 1 })
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 2, away_score: 1 }, false)
         .await
         .unwrap();
 
@@ -51,7 +55,7 @@ async fn upsert_at_lock_is_rejected() {
     let use_cases = build(FakePredictions::default(), member(MemberStatus::Active), clock("2026-06-18 11:50:00"));
 
     let result = use_cases
-        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 })
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 }, false)
         .await;
 
     assert_locked(result);
@@ -62,7 +66,7 @@ async fn upsert_after_lock_is_rejected() {
     let use_cases = build(FakePredictions::default(), member(MemberStatus::Active), clock("2026-06-18 12:30:00"));
 
     let result = use_cases
-        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 })
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 }, false)
         .await;
 
     assert_locked(result);
@@ -74,11 +78,11 @@ async fn second_upsert_overwrites_the_first() {
     let use_cases = build(predictions.clone(), member(MemberStatus::Active), clock("2026-06-18 11:00:00"));
 
     use_cases
-        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 2, away_score: 1 })
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 2, away_score: 1 }, false)
         .await
         .unwrap();
     let updated = use_cases
-        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 0, away_score: 0 })
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 0, away_score: 0 }, false)
         .await
         .unwrap();
 
@@ -92,7 +96,7 @@ async fn non_member_is_rejected() {
     let use_cases = build(FakePredictions::default(), None, clock("2026-06-18 11:00:00"));
 
     let result = use_cases
-        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 })
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 }, false)
         .await;
 
     assert!(matches!(result, Err(AppError::Coded { kind, code, .. })
@@ -104,7 +108,7 @@ async fn inactive_member_is_rejected() {
     let use_cases = build(FakePredictions::default(), member(MemberStatus::Inactive), clock("2026-06-18 11:00:00"));
 
     let result = use_cases
-        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 })
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 }, false)
         .await;
 
     assert!(matches!(result, Err(AppError::Coded { code, .. }) if code == "not_pool_member"));
@@ -121,7 +125,7 @@ async fn finished_match_is_locked_regardless_of_time() {
     );
 
     let result = use_cases
-        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 })
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 }, false)
         .await;
 
     assert_locked(result);
@@ -132,7 +136,7 @@ async fn upsert_more_than_five_days_before_is_rejected() {
     let use_cases = build(FakePredictions::default(), member(MemberStatus::Active), clock("2026-06-12 11:00:00"));
 
     let result = use_cases
-        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 })
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 }, false)
         .await;
 
     assert_code(result, "prediction_not_open_yet");
@@ -143,7 +147,7 @@ async fn upsert_exactly_five_days_before_is_rejected() {
     let use_cases = build(FakePredictions::default(), member(MemberStatus::Active), clock("2026-06-13 12:00:00"));
 
     let result = use_cases
-        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 })
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 }, false)
         .await;
 
     assert_code(result, "prediction_not_open_yet");
@@ -155,7 +159,7 @@ async fn upsert_within_five_days_persists_prediction() {
     let use_cases = build(predictions.clone(), member(MemberStatus::Active), clock("2026-06-14 11:00:00"));
 
     use_cases
-        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 2, away_score: 1 })
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 2, away_score: 1 }, false)
         .await
         .unwrap();
 
@@ -173,7 +177,7 @@ async fn upsert_without_defined_teams_is_rejected() {
     );
 
     let result = use_cases
-        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 })
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 }, false)
         .await;
 
     assert_code(result, "match_teams_undefined");
@@ -185,13 +189,72 @@ async fn list_mine_returns_member_predictions() {
     let use_cases = build(predictions.clone(), member(MemberStatus::Active), clock("2026-06-18 11:00:00"));
 
     use_cases
-        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 3, away_score: 2 })
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 3, away_score: 2 }, false)
         .await
         .unwrap();
 
     let mine = use_cases.list_mine(POOL_ID, USER_ID).await.unwrap();
     assert_eq!(mine.len(), 1);
     assert_eq!(mine[0].home_score.value(), 3);
+}
+
+#[tokio::test]
+async fn sync_replicates_to_same_tournament_open_pools_only() {
+    let predictions = FakePredictions::default();
+    let use_cases = PredictionUseCases::new(
+        predictions.clone(),
+        FakeMatches::with_status(MatchStatus::Scheduled),
+        SyncPools,
+        SyncMembers,
+        clock("2026-06-18 11:00:00"),
+    );
+
+    use_cases
+        .upsert(
+            POOL_ID,
+            USER_ID,
+            MATCH_ID,
+            UpsertPrediction { home_score: 2, away_score: 1 },
+            true,
+        )
+        .await
+        .unwrap();
+
+    let rows = predictions.rows.lock().unwrap();
+    let members: Vec<String> = rows.iter().map(|r| r.pool_member_id.clone()).collect();
+
+    // Source pool + the open same-tournament pool only.
+    assert_eq!(rows.len(), 2);
+    assert!(members.contains(&format!("member-{POOL_ID}")));
+    assert!(members.contains(&format!("member-{POOL_SAME_OPEN}")));
+    // Other-tournament and locked pools are skipped.
+    assert!(!members.contains(&format!("member-{POOL_OTHER_TOURNAMENT}")));
+    assert!(!members.contains(&format!("member-{POOL_SAME_LOCKED}")));
+}
+
+#[tokio::test]
+async fn sync_disabled_only_touches_current_pool() {
+    let predictions = FakePredictions::default();
+    let use_cases = PredictionUseCases::new(
+        predictions.clone(),
+        FakeMatches::with_status(MatchStatus::Scheduled),
+        SyncPools,
+        SyncMembers,
+        clock("2026-06-18 11:00:00"),
+    );
+
+    use_cases
+        .upsert(
+            POOL_ID,
+            USER_ID,
+            MATCH_ID,
+            UpsertPrediction { home_score: 2, away_score: 1 },
+            false,
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(predictions.rows.lock().unwrap().len(), 1);
 }
 
 // --- helpers & fakes -------------------------------------------------------
@@ -465,6 +528,129 @@ impl PoolMemberRepository for FakeMembers {
                 member,
             })
             .collect())
+    }
+
+    async fn count_active_owners(&self, _: &str) -> Result<u64, AppError> {
+        Ok(0)
+    }
+
+    async fn create(&self, _: NewMemberRecord) -> Result<(), AppError> {
+        Ok(())
+    }
+
+    async fn reactivate(&self, _: &str, _: &str) -> Result<(), AppError> {
+        Ok(())
+    }
+
+    async fn set_status(&self, _: &str, _: &str, _: Option<&str>) -> Result<(), AppError> {
+        Ok(())
+    }
+
+    async fn set_role(&self, _: &str, _: &str) -> Result<(), AppError> {
+        Ok(())
+    }
+}
+
+// Fakes exercising cross-pool prediction sync.
+
+fn pool(pool_id: &str, tournament_id: &str, lock_offset: u16, status: PoolStatus) -> Pool {
+    Pool {
+        id: id(pool_id),
+        tournament_id: id(tournament_id),
+        owner_user_id: id("owner-1"),
+        name: NonEmptyString::new("Bolão".to_owned(), "pool.name").unwrap(),
+        invite_code: InviteCode::new("ABC123".to_owned()).unwrap(),
+        join_requires_allowlist: false,
+        prediction_lock_offset_minutes: lock_offset,
+        status,
+        created_at: now(),
+        updated_at: now(),
+    }
+}
+
+#[derive(Clone)]
+struct SyncPools;
+
+#[async_trait]
+impl PoolRepository for SyncPools {
+    async fn find_by_id(&self, pool_id: &str) -> Result<Option<Pool>, AppError> {
+        if pool_id == POOL_ID {
+            return Ok(Some(pool(POOL_ID, TOURNAMENT_ID, LOCK_OFFSET, PoolStatus::Active)));
+        }
+        Ok(None)
+    }
+
+    async fn find_by_invite_code(&self, _: &str) -> Result<Option<Pool>, AppError> {
+        Ok(None)
+    }
+
+    async fn list_for_user(&self, _: &str) -> Result<Vec<Pool>, AppError> {
+        Ok(vec![
+            pool(POOL_ID, TOURNAMENT_ID, LOCK_OFFSET, PoolStatus::Active),
+            pool(POOL_SAME_OPEN, TOURNAMENT_ID, LOCK_OFFSET, PoolStatus::Active),
+            pool(POOL_OTHER_TOURNAMENT, TOURNAMENT_2, LOCK_OFFSET, PoolStatus::Active),
+            // Huge lock offset => window already locked at the test's "now".
+            pool(POOL_SAME_LOCKED, TOURNAMENT_ID, u16::MAX, PoolStatus::Active),
+        ])
+    }
+
+    async fn list_for_tournament(&self, _: &str) -> Result<Vec<Pool>, AppError> {
+        Ok(Vec::new())
+    }
+
+    async fn find_tournament_status(&self, _: &str) -> Result<Option<String>, AppError> {
+        Ok(Some("active".to_owned()))
+    }
+
+    async fn create_with_seed(&self, _: CreatePoolSeed) -> Result<(), AppError> {
+        Ok(())
+    }
+
+    async fn update_settings(&self, _: UpdatePoolRecord) -> Result<(), AppError> {
+        Ok(())
+    }
+
+    async fn delete(&self, _: &str) -> Result<(), AppError> {
+        Ok(())
+    }
+}
+
+#[derive(Clone)]
+struct SyncMembers;
+
+#[async_trait]
+impl PoolMemberRepository for SyncMembers {
+    async fn find_membership(
+        &self,
+        pool_id: &str,
+        user_id: &str,
+    ) -> Result<Option<PoolMember>, AppError> {
+        Ok(Some(PoolMember {
+            id: id(&format!("member-{pool_id}")),
+            pool_id: id(pool_id),
+            user_id: id(user_id),
+            role: PoolRole::Member,
+            status: MemberStatus::Active,
+            joined_at: now(),
+            left_at: None,
+            created_at: now(),
+            updated_at: now(),
+        }))
+    }
+
+    async fn find_by_id(&self, _: &str) -> Result<Option<PoolMember>, AppError> {
+        Ok(None)
+    }
+
+    async fn list_for_pool(&self, _: &str) -> Result<Vec<PoolMember>, AppError> {
+        Ok(Vec::new())
+    }
+
+    async fn list_for_pool_with_names(
+        &self,
+        _: &str,
+    ) -> Result<Vec<PoolMemberWithName>, AppError> {
+        Ok(Vec::new())
     }
 
     async fn count_active_owners(&self, _: &str) -> Result<u64, AppError> {

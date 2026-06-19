@@ -53,4 +53,10 @@ pub struct MeUser {
     pub display_name: String,
     pub email: String,
     pub role: String,
+    pub sync_predictions_across_pools: bool,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct UpdateUserPreferencesRequest {
+    pub sync_predictions_across_pools: bool,
 }

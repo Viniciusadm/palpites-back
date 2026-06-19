@@ -10,12 +10,14 @@ use crate::api::dto::predictions::{
 use crate::api::extractors::PoolMember;
 use crate::api::routes::v1::mod_helpers::app_error;
 use crate::api::state::AppState;
+use crate::application::auth::UserRepository;
 use crate::application::predictions::PredictionUseCases;
 use crate::infrastructure::clock::SystemClock;
 use crate::infrastructure::repositories::mysql_matches::MySqlMatchRepository;
 use crate::infrastructure::repositories::mysql_pool_members::MySqlPoolMemberRepository;
 use crate::infrastructure::repositories::mysql_pools::MySqlPoolRepository;
 use crate::infrastructure::repositories::mysql_predictions::MySqlPredictionRepository;
+use crate::infrastructure::repositories::mysql_users::MySqlUserRepository;
 
 pub fn router() -> Router<AppState> {
     Router::new()
@@ -76,8 +78,23 @@ async fn upsert(
         Err(error) => return app_error(error),
     };
 
+    let sync_across_pools = match MySqlUserRepository::new(db.clone())
+        .find_by_id(&member.user_id)
+        .await
+    {
+        Ok(Some(user)) => user.sync_predictions_across_pools,
+        Ok(None) => false,
+        Err(error) => return app_error(error),
+    };
+
     match prediction_use_cases(db)
-        .upsert(&member.pool_id, &member.user_id, &match_id, request.into())
+        .upsert(
+            &member.pool_id,
+            &member.user_id,
+            &match_id,
+            request.into(),
+            sync_across_pools,
+        )
         .await
     {
         Ok(prediction) => Json(PredictionResponse::from_prediction(&prediction)).into_response(),

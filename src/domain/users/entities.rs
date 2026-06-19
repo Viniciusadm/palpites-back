@@ -35,6 +35,7 @@ pub struct User {
     pub display_name: NonEmptyString,
     pub role: UserRole,
     pub avatar_file_id: Option<DomainId>,
+    pub sync_predictions_across_pools: bool,
     pub is_active: bool,
     pub last_login_at: Option<UtcDateTime>,
     pub created_at: UtcDateTime,

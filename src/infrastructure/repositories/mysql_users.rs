@@ -18,7 +18,7 @@ impl MySqlUserRepository {
 
     async fn find_by_column(&self, column: &str, value: &str) -> Result<Option<User>, AppError> {
         let sql = format!(
-            "SELECT id, email, password_hash, display_name, role, avatar_file_id, is_active, last_login_at, created_at, updated_at FROM users WHERE {column} = ?"
+            "SELECT id, email, password_hash, display_name, role, avatar_file_id, sync_predictions_across_pools, is_active, last_login_at, created_at, updated_at FROM users WHERE {column} = ?"
         );
         let row = sqlx::query(&sql)
             .bind(value)
@@ -36,6 +36,7 @@ impl MySqlUserRepository {
                 display_name: mapper::non_empty(row.try_get("display_name")?, "user.display_name")?,
                 role: mapper::user_role(row.try_get("role")?)?,
                 avatar_file_id: mapper::opt_id(row.try_get("avatar_file_id")?)?,
+                sync_predictions_across_pools: row.try_get("sync_predictions_across_pools")?,
                 is_active: row.try_get("is_active")?,
                 last_login_at: mapper::opt_datetime(row.try_get("last_login_at")?)?,
                 created_at: mapper::datetime(row.try_get("created_at")?)?,
@@ -76,6 +77,19 @@ impl UserRepository for MySqlUserRepository {
         .execute(&self.pool)
         .await
         .map_err(Self::map_write_error)?;
+        Ok(())
+    }
+
+    async fn set_sync_predictions_across_pools(
+        &self,
+        user_id: &str,
+        value: bool,
+    ) -> Result<(), AppError> {
+        sqlx::query("UPDATE users SET sync_predictions_across_pools = ? WHERE id = ?")
+            .bind(value)
+            .bind(user_id)
+            .execute(&self.pool)
+            .await?;
         Ok(())
     }
 }

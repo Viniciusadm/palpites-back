@@ -7,8 +7,8 @@ use crate::application::predictions::{
     PredictionRepository, UpsertPrediction, UpsertPredictionRecord,
 };
 use crate::application::shared::{parse_datetime, Clock};
-use crate::domain::matches::MatchStatus;
-use crate::domain::pools::MemberStatus;
+use crate::domain::matches::{Match, MatchStatus};
+use crate::domain::pools::{MemberStatus, PoolStatus};
 use crate::domain::predictions::Prediction;
 use crate::domain::Score;
 use crate::errors::AppError;
@@ -54,6 +54,7 @@ where
         user_id: &str,
         match_id: &str,
         command: UpsertPrediction,
+        sync_across_pools: bool,
     ) -> Result<Prediction, AppError> {
         let member_id = self.resolve_active_member(pool_id, user_id).await?;
 
@@ -98,10 +99,77 @@ where
             })
             .await?;
 
+        if sync_across_pools {
+            self.propagate_to_other_pools(
+                pool_id,
+                user_id,
+                &game,
+                home_score.value(),
+                away_score.value(),
+            )
+            .await?;
+        }
+
         self.predictions
             .find_for_member_and_match(&member_id, match_id)
             .await?
             .ok_or_else(|| AppError::Internal("prediction was not persisted".to_owned()))
+    }
+
+    /// Replicates a prediction to the user's other active pools that belong to the
+    /// same tournament as the match. Pools whose prediction window is closed (locked)
+    /// are skipped silently; replication never fails the primary save.
+    async fn propagate_to_other_pools(
+        &self,
+        source_pool_id: &str,
+        user_id: &str,
+        game: &Match,
+        home_score: u8,
+        away_score: u8,
+    ) -> Result<(), AppError> {
+        let pools = self.pools.list_for_user(user_id).await?;
+
+        for target in pools {
+            if target.id.as_str() == source_pool_id
+                || target.status != PoolStatus::Active
+                || target.tournament_id.as_str() != game.tournament_id.as_str()
+            {
+                continue;
+            }
+
+            // Skip pools where the prediction window is not open (locked / not yet open).
+            if self
+                .ensure_open(
+                    &game.status,
+                    game.kickoff_at.as_str(),
+                    target.prediction_lock_offset_minutes,
+                )
+                .is_err()
+            {
+                continue;
+            }
+
+            let member = self
+                .members
+                .find_membership(target.id.as_str(), user_id)
+                .await?
+                .filter(|member| member.status == MemberStatus::Active);
+            let Some(member) = member else {
+                continue;
+            };
+
+            self.predictions
+                .upsert(UpsertPredictionRecord {
+                    prediction_id: Uuid::new_v4().to_string(),
+                    pool_member_id: member.id.as_str().to_owned(),
+                    match_id: game.id.as_str().to_owned(),
+                    home_score,
+                    away_score,
+                })
+                .await?;
+        }
+
+        Ok(())
     }
 
     async fn resolve_active_member(
