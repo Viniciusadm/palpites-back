@@ -78,6 +78,17 @@ where
             ));
         }
 
+        let now = self.now()?;
+        let kickoff = parse_datetime(game.kickoff_at.as_str()).ok_or_else(|| {
+            AppError::Internal("match has an invalid kickoff date-time".to_owned())
+        })?;
+        if now < kickoff + Duration::minutes(110) {
+            return Err(AppError::conflict_code(
+                "result_too_early",
+                "a result can only be entered after the match has been played",
+            ));
+        }
+
         let finished_at = self.clock.now().as_str().to_owned();
         let overlay = Overlay {
             match_id: match_id.to_owned(),

@@ -133,6 +133,31 @@ async fn enter_result_scores_predictions_across_pools_with_different_rules() {
     assert_eq!(position_for(pool_b, "m3"), 2);
 }
 
+// --- result can only be entered after the match was played ------------------
+
+#[tokio::test]
+async fn enter_result_is_rejected_before_the_result_window_opens() {
+    let members = FakeMembers::default();
+    members.add_active("pool-a", "m1", "u1");
+
+    // Match kicks off at 16:00; the clock is only 30 min in, well short of the
+    // 110-min window, so the result must be rejected.
+    let use_cases = ResultUseCases::new(
+        FakeStandings::default(),
+        FakeMatches::with_status(MatchStatus::Scheduled),
+        FakeScoring::default(),
+        FakePools::default(),
+        members,
+        FixedClock::new("2026-06-18 16:30:00"),
+        NoopNotifier,
+    );
+
+    let result = use_cases
+        .enter_result(MATCH_ID, EnterResult { home_score: 2, away_score: 1 })
+        .await;
+    assert!(matches!(result, Err(AppError::Coded { code, .. }) if code == "result_too_early"));
+}
+
 // --- rescoring after a rule change -----------------------------------------
 
 #[tokio::test]
@@ -509,11 +534,17 @@ impl ScoringRuleRepository for FakeScoring {
 #[derive(Clone)]
 struct FakeMatches {
     status: MatchStatus,
+    kickoff_at: String,
 }
 
 impl FakeMatches {
     fn with_status(status: MatchStatus) -> Self {
-        Self { status }
+        // Kickoff well before the fixed test clock (18:00) so the result window
+        // (>= 110 min after kickoff) is already open.
+        Self {
+            status,
+            kickoff_at: "2026-06-18 16:00:00".to_owned(),
+        }
     }
 }
 
@@ -530,7 +561,7 @@ impl MatchRepository for FakeMatches {
             stage_id: id("stage-1"),
             home_team_id: Some(id("team-home")),
             away_team_id: Some(id("team-away")),
-            kickoff_at: now(),
+            kickoff_at: UtcDateTime::new_iso8601(self.kickoff_at.clone()).unwrap(),
             status: self.status,
             home_score: None,
             away_score: None,
