@@ -67,6 +67,10 @@ pub trait NotificationPreferenceRepository: Send + Sync {
         user_id: &str,
         pool_id: &str,
     ) -> Result<Vec<NotificationPreference>, AppError>;
+    async fn list_for_global(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<NotificationPreference>, AppError>;
     async fn upsert_many(&self, records: Vec<NewPreferenceRecord>) -> Result<(), AppError>;
 }
 

@@ -51,6 +51,10 @@ pub fn router() -> Router<AppState> {
         .route("/notifications/devices", post(register_device))
         .route("/notifications/devices/:token", delete(unregister_device))
         .route(
+            "/notifications/preferences",
+            get(get_global_preferences).put(update_global_preferences),
+        )
+        .route(
             "/pools/:id/notification-preferences",
             get(get_preferences).put(update_preferences),
         )
@@ -159,6 +163,52 @@ async fn unregister_device(
 
     match MySqlDeviceTokenRepository::new(db).remove(&token).await {
         Ok(()) => StatusCode::NO_CONTENT.into_response(),
+        Err(error) => app_error(error),
+    }
+}
+
+async fn get_global_preferences(
+    State(state): State<AppState>,
+    auth: AuthenticatedUser,
+) -> Response {
+    let db = match state.db() {
+        Ok(db) => db,
+        Err(error) => return app_error(error),
+    };
+
+    match notifier(db).get_global_preferences(&auth.user_id).await {
+        Ok(preferences) => Json(NotificationPreferencesListResponse {
+            preferences: preferences
+                .iter()
+                .map(NotificationPreferenceResponse::from_preference)
+                .collect(),
+        })
+        .into_response(),
+        Err(error) => app_error(error),
+    }
+}
+
+async fn update_global_preferences(
+    State(state): State<AppState>,
+    auth: AuthenticatedUser,
+    Json(request): Json<UpdatePreferencesRequest>,
+) -> Response {
+    let db = match state.db() {
+        Ok(db) => db,
+        Err(error) => return app_error(error),
+    };
+
+    match notifier(db)
+        .update_global_preferences(&auth.user_id, request.into())
+        .await
+    {
+        Ok(preferences) => Json(NotificationPreferencesListResponse {
+            preferences: preferences
+                .iter()
+                .map(NotificationPreferenceResponse::from_preference)
+                .collect(),
+        })
+        .into_response(),
         Err(error) => app_error(error),
     }
 }

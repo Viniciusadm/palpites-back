@@ -116,6 +116,41 @@ where
         self.get_preferences(user_id, pool_id).await
     }
 
+    pub async fn get_global_preferences(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<NotificationPreference>, AppError> {
+        self.preferences.list_for_global(user_id).await
+    }
+
+    pub async fn update_global_preferences(
+        &self,
+        user_id: &str,
+        command: UpdatePreferences,
+    ) -> Result<Vec<NotificationPreference>, AppError> {
+        let mut records = Vec::with_capacity(command.items.len());
+        for item in command.items {
+            let notification_type = NotificationType::parse(&item.notification_type)?;
+            if !notification_type.is_preferenceable() {
+                return Err(AppError::validation_code(
+                    "notification_type_not_preferenceable",
+                    "this notification type has no configurable preference",
+                ));
+            }
+            let channel = Channel::parse(&item.channel)?;
+            records.push(NewPreferenceRecord {
+                id: new_id(),
+                user_id: user_id.to_owned(),
+                pool_id: None,
+                notification_type: notification_type.as_str().to_owned(),
+                channel: channel.as_str().to_owned(),
+                enabled: item.enabled,
+            });
+        }
+        self.preferences.upsert_many(records).await?;
+        self.get_global_preferences(user_id).await
+    }
+
     async fn owned_notification(
         &self,
         user_id: &str,

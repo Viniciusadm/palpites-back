@@ -448,6 +448,21 @@ impl NotificationPreferenceRepository for FakePreferences {
             .collect())
     }
 
+    async fn list_for_global(
+        &self,
+        user_id: &str,
+    ) -> Result<Vec<NotificationPreference>, AppError> {
+        Ok(self
+            .rows
+            .lock()
+            .unwrap()
+            .iter()
+            .filter(|pref| pref.user_id.as_str() == user_id)
+            .filter(|pref| pref.pool_id.is_none())
+            .cloned()
+            .collect())
+    }
+
     async fn upsert_many(&self, records: Vec<NewPreferenceRecord>) -> Result<(), AppError> {
         self.upserted.lock().unwrap().extend(records);
         Ok(())
