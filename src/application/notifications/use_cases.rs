@@ -217,6 +217,7 @@ where
                 outbox_records.push(NewOutboxRecord {
                     id: new_id(),
                     channel: Channel::Push.as_str().to_owned(),
+                    notification_type: notification_type.as_str().to_owned(),
                     user_id,
                     title: title.to_owned(),
                     body: body.to_owned(),

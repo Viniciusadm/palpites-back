@@ -46,7 +46,7 @@ impl JwtTokenService {
 
 impl TokenIssuer for JwtTokenService {
     fn issue_access_token(&self, user_id: &str) -> Result<String, AppError> {
-        let expires_at = Utc::now() + Duration::hours(12);
+        let expires_at = Utc::now() + Duration::days(30);
         let claims = AccessTokenClaims {
             sub: user_id.to_owned(),
             exp: expires_at.timestamp() as usize,

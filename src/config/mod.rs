@@ -18,6 +18,7 @@ pub struct AppConfig {
     pub jobs_enabled: bool,
     pub jobs_reminder_interval_seconds: u64,
     pub jobs_reminder_window_minutes: u32,
+    pub jobs_reminder_throttle_minutes: u32,
     pub jobs_dispatch_interval_seconds: u64,
     pub jobs_live_interval_seconds: u64,
     pub fcm_project_id: Option<String>,
@@ -65,6 +66,10 @@ impl AppConfig {
             .ok()
             .and_then(|value| value.parse().ok())
             .unwrap_or(60);
+        let jobs_reminder_throttle_minutes = env::var("JOBS_REMINDER_THROTTLE_MINUTES")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(60);
         let jobs_dispatch_interval_seconds = env::var("JOBS_DISPATCH_INTERVAL_SECONDS")
             .ok()
             .and_then(|value| value.parse().ok())
@@ -96,6 +101,7 @@ impl AppConfig {
             jobs_enabled,
             jobs_reminder_interval_seconds,
             jobs_reminder_window_minutes,
+            jobs_reminder_throttle_minutes,
             jobs_dispatch_interval_seconds,
             jobs_live_interval_seconds,
             fcm_project_id,

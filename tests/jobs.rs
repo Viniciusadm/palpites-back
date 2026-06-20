@@ -42,7 +42,7 @@ async fn reminds_only_members_lacking_a_prediction() {
         FixedClock::new(NOW),
     );
 
-    let created = runner.run(ReminderWindow::new(60)).await.unwrap();
+    let created = runner.run(ReminderWindow::new(60, 60)).await.unwrap();
 
     assert_eq!(created, 1);
     let calls = notifier.calls.lock().unwrap();
@@ -75,7 +75,7 @@ async fn skips_recipients_already_reminded() {
         FixedClock::new(NOW),
     );
 
-    let created = runner.run(ReminderWindow::new(60)).await.unwrap();
+    let created = runner.run(ReminderWindow::new(60, 60)).await.unwrap();
 
     assert_eq!(created, 1);
     let calls = notifier.calls.lock().unwrap();
@@ -101,7 +101,57 @@ async fn does_not_remind_when_prediction_window_is_locked() {
         FixedClock::new(NOW),
     );
 
-    let created = runner.run(ReminderWindow::new(60)).await.unwrap();
+    let created = runner.run(ReminderWindow::new(60, 60)).await.unwrap();
+
+    assert_eq!(created, 0);
+    assert!(notifier.calls.lock().unwrap().is_empty());
+}
+
+#[tokio::test]
+async fn reminds_user_only_once_across_multiple_matches() {
+    let notifier = RecordingNotifier::default();
+    let runner = SendPredictionReminders::new(
+        FakeReminderQuery::new(
+            vec![scheduled_match(), scheduled_match_with_id("match-2")],
+            vec![],
+        ),
+        FakePools::new(vec![pool(10)]),
+        FakeMembers::new(vec![member("member-b", "user-b")]),
+        FakePredictions::new(vec![]),
+        notifier.clone(),
+        FixedClock::new(NOW),
+    );
+
+    let created = runner.run(ReminderWindow::new(60, 60)).await.unwrap();
+
+    // Mesmo com dois jogos, o usuário recebe um único lembrete.
+    assert_eq!(created, 1);
+    let calls = notifier.calls.lock().unwrap();
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].0, MATCH_ID);
+    assert_eq!(
+        calls[0].1,
+        vec![ReminderRecipient {
+            user_id: "user-b".to_owned(),
+            pool_id: POOL_ID.to_owned(),
+        }]
+    );
+}
+
+#[tokio::test]
+async fn skips_users_reminded_within_throttle_window() {
+    let notifier = RecordingNotifier::default();
+    let runner = SendPredictionReminders::new(
+        FakeReminderQuery::new(vec![scheduled_match()], vec![])
+            .with_reminded_users(vec!["user-b".to_owned()]),
+        FakePools::new(vec![pool(10)]),
+        FakeMembers::new(vec![member("member-b", "user-b")]),
+        FakePredictions::new(vec![]),
+        notifier.clone(),
+        FixedClock::new(NOW),
+    );
+
+    let created = runner.run(ReminderWindow::new(60, 60)).await.unwrap();
 
     assert_eq!(created, 0);
     assert!(notifier.calls.lock().unwrap().is_empty());
@@ -153,11 +203,21 @@ async fn dispatch_marks_failed_when_sender_errors() {
 struct FakeReminderQuery {
     matches: Vec<Match>,
     reminded: Vec<RemindedRecipient>,
+    reminded_users: Vec<String>,
 }
 
 impl FakeReminderQuery {
     fn new(matches: Vec<Match>, reminded: Vec<RemindedRecipient>) -> Self {
-        Self { matches, reminded }
+        Self {
+            matches,
+            reminded,
+            reminded_users: Vec::new(),
+        }
+    }
+
+    fn with_reminded_users(mut self, reminded_users: Vec<String>) -> Self {
+        self.reminded_users = reminded_users;
+        self
     }
 }
 
@@ -176,6 +236,10 @@ impl ReminderQueryRepository for FakeReminderQuery {
         _match_id: &str,
     ) -> Result<Vec<RemindedRecipient>, AppError> {
         Ok(self.reminded.clone())
+    }
+
+    async fn users_reminded_since(&self, _since: &str) -> Result<Vec<String>, AppError> {
+        Ok(self.reminded_users.clone())
     }
 }
 
@@ -435,6 +499,13 @@ fn scheduled_match() -> Match {
         finished_at: None,
         created_at: now(),
         updated_at: now(),
+    }
+}
+
+fn scheduled_match_with_id(match_id: &str) -> Match {
+    Match {
+        id: id(match_id),
+        ..scheduled_match()
     }
 }
 

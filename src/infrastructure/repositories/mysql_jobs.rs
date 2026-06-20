@@ -67,6 +67,27 @@ impl ReminderQueryRepository for MySqlJobsRepository {
             })
             .collect()
     }
+
+    async fn users_reminded_since(&self, since: &str) -> Result<Vec<String>, AppError> {
+        // Considera tanto lembretes in-app (notifications) quanto push enfileirados
+        // (notification_outbox), para que o throttle entre runs também cubra
+        // usuários que recebem apenas push.
+        let rows = sqlx::query(
+            "SELECT user_id FROM notifications \
+             WHERE type = 'prediction_reminder' AND created_at >= ? \
+             UNION \
+             SELECT user_id FROM notification_outbox \
+             WHERE type = 'prediction_reminder' AND created_at >= ?",
+        )
+        .bind(since)
+        .bind(since)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| Ok(row.try_get("user_id")?))
+            .collect()
+    }
 }
 
 #[async_trait]
@@ -135,11 +156,12 @@ impl NotificationOutboxWriter for MySqlJobsRepository {
         for record in &records {
             sqlx::query(
                 "INSERT INTO notification_outbox \
-                 (id, channel, user_id, title, body, related_match_id, pool_id) \
-                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+                 (id, channel, type, user_id, title, body, related_match_id, pool_id) \
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(&record.id)
             .bind(&record.channel)
+            .bind(&record.notification_type)
             .bind(&record.user_id)
             .bind(&record.title)
             .bind(&record.body)

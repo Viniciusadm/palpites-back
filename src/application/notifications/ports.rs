@@ -28,6 +28,7 @@ pub struct NewPreferenceRecord {
 pub struct NewOutboxRecord {
     pub id: String,
     pub channel: String,
+    pub notification_type: String,
     pub user_id: String,
     pub title: String,
     pub body: String,

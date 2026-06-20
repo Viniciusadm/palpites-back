@@ -29,7 +29,10 @@ pub fn spawn(pool: MySqlPool, config: &AppConfig) {
     }
 
     let reminder_interval = Duration::from_secs(config.jobs_reminder_interval_seconds);
-    let reminder_window = ReminderWindow::new(config.jobs_reminder_window_minutes);
+    let reminder_window = ReminderWindow::new(
+        config.jobs_reminder_window_minutes,
+        config.jobs_reminder_throttle_minutes,
+    );
     let reminder_pool = pool.clone();
     tokio::spawn(async move {
         let mut ticker = interval(reminder_interval);

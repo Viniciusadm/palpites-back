@@ -30,6 +30,10 @@ pub trait ReminderQueryRepository: Send + Sync {
         &self,
         match_id: &str,
     ) -> Result<Vec<RemindedRecipient>, AppError>;
+    /// user_ids que já receberam um `prediction_reminder` desde `since`
+    /// (timestamp UTC). Usado para garantir no máximo um lembrete por usuário
+    /// dentro da janela de throttle, independentemente de quantos jogos existam.
+    async fn users_reminded_since(&self, since: &str) -> Result<Vec<String>, AppError>;
 }
 
 #[async_trait]

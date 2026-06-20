@@ -60,6 +60,17 @@ where
             .upcoming_scheduled_matches(now.as_str(), &until)
             .await?;
 
+        // Garante no máximo um lembrete por usuário dentro da janela de throttle,
+        // mesmo que existam vários jogos. Começa com quem já foi lembrado
+        // recentemente e cresce conforme novos usuários são notificados neste run.
+        let throttle_since = now_dt - Duration::minutes(i64::from(window.throttle_minutes));
+        let mut reminded_users: HashSet<String> = self
+            .queries
+            .users_reminded_since(&throttle_since.to_string())
+            .await?
+            .into_iter()
+            .collect();
+
         let mut created = 0u32;
         for game in matches {
             let kickoff_dt = match parse_datetime(game.kickoff_at.as_str()) {
@@ -112,6 +123,10 @@ where
                     if already.contains(&(user_id.clone(), pool_id.clone())) {
                         continue;
                     }
+                    if reminded_users.contains(&user_id) {
+                        continue;
+                    }
+                    reminded_users.insert(user_id.clone());
                     recipients.push(ReminderRecipient { user_id, pool_id });
                 }
             }
