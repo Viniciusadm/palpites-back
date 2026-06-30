@@ -4,6 +4,7 @@ pub struct CreateMatch {
     pub home_team_id: Option<String>,
     pub away_team_id: Option<String>,
     pub kickoff_at: String,
+    pub can_go_to_penalties: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -13,6 +14,7 @@ pub struct UpdateMatch {
     pub away_team_id: Option<String>,
     pub kickoff_at: String,
     pub status: String,
+    pub can_go_to_penalties: bool,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq)]

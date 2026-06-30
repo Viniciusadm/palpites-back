@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 
 use crate::domain::standings::Standing;
+use crate::domain::PenaltySide;
 use crate::errors::AppError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -16,10 +17,12 @@ pub struct PredictionLine {
     pub match_id: String,
     pub prediction_home: u8,
     pub prediction_away: u8,
+    pub prediction_penalties_pick: Option<PenaltySide>,
     pub match_status: String,
     pub kickoff_at: String,
     pub result_home: Option<u8>,
     pub result_away: Option<u8>,
+    pub result_penalties_winner: Option<PenaltySide>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -38,6 +41,7 @@ pub struct StandingRecord {
     pub exact_count: i32,
     pub outcome_count: i32,
     pub hits_count: i32,
+    pub penalties_count: i32,
     pub position: i32,
 }
 
@@ -53,6 +57,7 @@ pub struct ResultApplication {
     pub match_id: String,
     pub home_score: u8,
     pub away_score: u8,
+    pub penalties_winner: Option<PenaltySide>,
     pub finished_at: String,
     pub pools: Vec<PoolRecompute>,
 }

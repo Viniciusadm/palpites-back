@@ -106,6 +106,11 @@ where
                     rule_key: ScoringRuleKey::CorrectOutcome.as_str().to_owned(),
                     points: 5,
                 },
+                NewScoringRuleRecord {
+                    rule_id: new_id(),
+                    rule_key: ScoringRuleKey::PenaltiesWinner.as_str().to_owned(),
+                    points: 5,
+                },
             ],
             owner_member: NewMemberRecord {
                 member_id: new_id(),

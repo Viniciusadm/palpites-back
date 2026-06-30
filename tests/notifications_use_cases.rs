@@ -724,6 +724,8 @@ fn match_row(match_id: &str, tournament_id: &str) -> Match {
         status: MatchStatus::Scheduled,
         home_score: None,
         away_score: None,
+        can_go_to_penalties: false,
+        penalties_winner: None,
         finished_at: None,
         created_at: now(),
         updated_at: now(),

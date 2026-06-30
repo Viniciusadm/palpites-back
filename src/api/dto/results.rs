@@ -8,6 +8,8 @@ use crate::application::results::{
 pub struct EnterResultRequest {
     pub home_score: u8,
     pub away_score: u8,
+    #[serde(default)]
+    pub penalties_winner: Option<String>,
 }
 
 impl From<EnterResultRequest> for EnterResult {
@@ -15,6 +17,7 @@ impl From<EnterResultRequest> for EnterResult {
         Self {
             home_score: value.home_score,
             away_score: value.away_score,
+            penalties_winner: value.penalties_winner,
         }
     }
 }
@@ -27,6 +30,7 @@ pub struct RankingEntryResponse {
     pub exact_count: i32,
     pub outcome_count: i32,
     pub hits_count: i32,
+    pub penalties_count: i32,
     pub position: i32,
 }
 
@@ -39,6 +43,7 @@ impl RankingEntryResponse {
             exact_count: value.standing.exact_count,
             outcome_count: value.standing.outcome_count,
             hits_count: value.standing.hits_count,
+            penalties_count: value.standing.penalties_count,
             position: value.standing.position,
         }
     }
@@ -70,6 +75,8 @@ pub struct HistoryEntryResponse {
     pub prediction_away: u8,
     pub result_home: Option<u8>,
     pub result_away: Option<u8>,
+    pub prediction_penalties_pick: Option<String>,
+    pub result_penalties_winner: Option<String>,
     pub points_awarded: Option<i16>,
     pub hit_kind: Option<String>,
 }
@@ -84,6 +91,8 @@ impl HistoryEntryResponse {
             prediction_away: value.prediction_away,
             result_home: value.result_home,
             result_away: value.result_away,
+            prediction_penalties_pick: value.prediction_penalties_pick.clone(),
+            result_penalties_winner: value.result_penalties_winner.clone(),
             points_awarded: value.points_awarded,
             hit_kind: value.hit_kind.clone(),
         }
@@ -97,6 +106,7 @@ pub struct HistoryResponse {
     pub exact_count: i32,
     pub outcome_count: i32,
     pub hits_count: i32,
+    pub penalties_count: i32,
     pub errors_count: i32,
     pub pending_count: i32,
     pub entries: Vec<HistoryEntryResponse>,
@@ -110,6 +120,7 @@ impl HistoryResponse {
             exact_count: value.exact_count,
             outcome_count: value.outcome_count,
             hits_count: value.hits_count,
+            penalties_count: value.penalties_count,
             errors_count: value.errors_count,
             pending_count: value.pending_count,
             entries: value
@@ -130,6 +141,8 @@ pub struct MemberPredictionResponse {
     pub prediction_away: u8,
     pub result_home: Option<u8>,
     pub result_away: Option<u8>,
+    pub prediction_penalties_pick: Option<String>,
+    pub result_penalties_winner: Option<String>,
     pub points_awarded: Option<i16>,
 }
 
@@ -143,6 +156,8 @@ impl MemberPredictionResponse {
             prediction_away: value.prediction_away,
             result_home: value.result_home,
             result_away: value.result_away,
+            prediction_penalties_pick: value.prediction_penalties_pick.clone(),
+            result_penalties_winner: value.result_penalties_winner.clone(),
             points_awarded: value.points_awarded,
         }
     }

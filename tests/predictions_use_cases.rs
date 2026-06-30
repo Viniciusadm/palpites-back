@@ -19,7 +19,9 @@ use palpites_back::domain::pools::{
     MemberStatus, Pool, PoolMember, PoolRole, PoolStatus,
 };
 use palpites_back::domain::predictions::Prediction;
-use palpites_back::domain::{DomainId, InviteCode, NonEmptyString, Score, UtcDateTime};
+use palpites_back::domain::{
+    DomainId, InviteCode, NonEmptyString, PenaltySide, Score, UtcDateTime,
+};
 use palpites_back::errors::AppError;
 use support::FixedClock;
 
@@ -41,7 +43,7 @@ async fn upsert_before_lock_persists_prediction() {
     let use_cases = build(predictions.clone(), member(MemberStatus::Active), clock("2026-06-18 11:00:00"));
 
     let prediction = use_cases
-        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 2, away_score: 1 }, false)
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 2, away_score: 1, penalties_pick: None }, false)
         .await
         .unwrap();
 
@@ -51,11 +53,82 @@ async fn upsert_before_lock_persists_prediction() {
 }
 
 #[tokio::test]
+async fn penalty_pick_is_persisted_for_a_draw_on_a_penalty_match() {
+    let predictions = FakePredictions::default();
+    let use_cases = build_with_matches(
+        predictions.clone(),
+        member(MemberStatus::Active),
+        clock("2026-06-18 11:00:00"),
+        FakeMatches::with_penalties(),
+    );
+
+    use_cases
+        .upsert(
+            POOL_ID,
+            USER_ID,
+            MATCH_ID,
+            UpsertPrediction { home_score: 1, away_score: 1, penalties_pick: Some("home".to_owned()) },
+            false,
+        )
+        .await
+        .unwrap();
+
+    let rows = predictions.rows.lock().unwrap();
+    assert_eq!(rows[0].penalties_pick, Some(PenaltySide::Home));
+}
+
+#[tokio::test]
+async fn penalty_pick_is_cleared_when_prediction_is_not_a_draw() {
+    let predictions = FakePredictions::default();
+    let use_cases = build_with_matches(
+        predictions.clone(),
+        member(MemberStatus::Active),
+        clock("2026-06-18 11:00:00"),
+        FakeMatches::with_penalties(),
+    );
+
+    use_cases
+        .upsert(
+            POOL_ID,
+            USER_ID,
+            MATCH_ID,
+            UpsertPrediction { home_score: 2, away_score: 1, penalties_pick: Some("home".to_owned()) },
+            false,
+        )
+        .await
+        .unwrap();
+
+    let rows = predictions.rows.lock().unwrap();
+    assert_eq!(rows[0].penalties_pick, None);
+}
+
+#[tokio::test]
+async fn penalty_pick_is_cleared_when_match_cannot_go_to_penalties() {
+    let predictions = FakePredictions::default();
+    // Default match does not allow penalties even though the score is a draw.
+    let use_cases = build(predictions.clone(), member(MemberStatus::Active), clock("2026-06-18 11:00:00"));
+
+    use_cases
+        .upsert(
+            POOL_ID,
+            USER_ID,
+            MATCH_ID,
+            UpsertPrediction { home_score: 1, away_score: 1, penalties_pick: Some("away".to_owned()) },
+            false,
+        )
+        .await
+        .unwrap();
+
+    let rows = predictions.rows.lock().unwrap();
+    assert_eq!(rows[0].penalties_pick, None);
+}
+
+#[tokio::test]
 async fn upsert_at_lock_is_rejected() {
     let use_cases = build(FakePredictions::default(), member(MemberStatus::Active), clock("2026-06-18 11:50:00"));
 
     let result = use_cases
-        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 }, false)
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0, penalties_pick: None }, false)
         .await;
 
     assert_locked(result);
@@ -66,7 +139,7 @@ async fn upsert_after_lock_is_rejected() {
     let use_cases = build(FakePredictions::default(), member(MemberStatus::Active), clock("2026-06-18 12:30:00"));
 
     let result = use_cases
-        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 }, false)
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0, penalties_pick: None }, false)
         .await;
 
     assert_locked(result);
@@ -78,11 +151,11 @@ async fn second_upsert_overwrites_the_first() {
     let use_cases = build(predictions.clone(), member(MemberStatus::Active), clock("2026-06-18 11:00:00"));
 
     use_cases
-        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 2, away_score: 1 }, false)
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 2, away_score: 1, penalties_pick: None }, false)
         .await
         .unwrap();
     let updated = use_cases
-        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 0, away_score: 0 }, false)
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 0, away_score: 0, penalties_pick: None }, false)
         .await
         .unwrap();
 
@@ -96,7 +169,7 @@ async fn non_member_is_rejected() {
     let use_cases = build(FakePredictions::default(), None, clock("2026-06-18 11:00:00"));
 
     let result = use_cases
-        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 }, false)
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0, penalties_pick: None }, false)
         .await;
 
     assert!(matches!(result, Err(AppError::Coded { kind, code, .. })
@@ -108,7 +181,7 @@ async fn inactive_member_is_rejected() {
     let use_cases = build(FakePredictions::default(), member(MemberStatus::Inactive), clock("2026-06-18 11:00:00"));
 
     let result = use_cases
-        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 }, false)
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0, penalties_pick: None }, false)
         .await;
 
     assert!(matches!(result, Err(AppError::Coded { code, .. }) if code == "not_pool_member"));
@@ -125,7 +198,7 @@ async fn finished_match_is_locked_regardless_of_time() {
     );
 
     let result = use_cases
-        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 }, false)
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0, penalties_pick: None }, false)
         .await;
 
     assert_locked(result);
@@ -136,7 +209,7 @@ async fn upsert_more_than_five_days_before_is_rejected() {
     let use_cases = build(FakePredictions::default(), member(MemberStatus::Active), clock("2026-06-12 11:00:00"));
 
     let result = use_cases
-        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 }, false)
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0, penalties_pick: None }, false)
         .await;
 
     assert_code(result, "prediction_not_open_yet");
@@ -147,7 +220,7 @@ async fn upsert_exactly_five_days_before_is_rejected() {
     let use_cases = build(FakePredictions::default(), member(MemberStatus::Active), clock("2026-06-13 12:00:00"));
 
     let result = use_cases
-        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 }, false)
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0, penalties_pick: None }, false)
         .await;
 
     assert_code(result, "prediction_not_open_yet");
@@ -159,7 +232,7 @@ async fn upsert_within_five_days_persists_prediction() {
     let use_cases = build(predictions.clone(), member(MemberStatus::Active), clock("2026-06-14 11:00:00"));
 
     use_cases
-        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 2, away_score: 1 }, false)
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 2, away_score: 1, penalties_pick: None }, false)
         .await
         .unwrap();
 
@@ -177,7 +250,7 @@ async fn upsert_without_defined_teams_is_rejected() {
     );
 
     let result = use_cases
-        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0 }, false)
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 1, away_score: 0, penalties_pick: None }, false)
         .await;
 
     assert_code(result, "match_teams_undefined");
@@ -189,7 +262,7 @@ async fn list_mine_returns_member_predictions() {
     let use_cases = build(predictions.clone(), member(MemberStatus::Active), clock("2026-06-18 11:00:00"));
 
     use_cases
-        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 3, away_score: 2 }, false)
+        .upsert(POOL_ID, USER_ID, MATCH_ID, UpsertPrediction { home_score: 3, away_score: 2, penalties_pick: None }, false)
         .await
         .unwrap();
 
@@ -214,7 +287,7 @@ async fn sync_replicates_to_same_tournament_open_pools_only() {
             POOL_ID,
             USER_ID,
             MATCH_ID,
-            UpsertPrediction { home_score: 2, away_score: 1 },
+            UpsertPrediction { home_score: 2, away_score: 1, penalties_pick: None },
             true,
         )
         .await
@@ -248,7 +321,7 @@ async fn sync_disabled_only_touches_current_pool() {
             POOL_ID,
             USER_ID,
             MATCH_ID,
-            UpsertPrediction { home_score: 2, away_score: 1 },
+            UpsertPrediction { home_score: 2, away_score: 1, penalties_pick: None },
             false,
         )
         .await
@@ -264,9 +337,23 @@ fn build(
     membership: Option<PoolMember>,
     clock: FixedClock,
 ) -> PredictionUseCases<FakePredictions, FakeMatches, FakePools, FakeMembers, FixedClock> {
+    build_with_matches(
+        predictions,
+        membership,
+        clock,
+        FakeMatches::with_status(MatchStatus::Scheduled),
+    )
+}
+
+fn build_with_matches(
+    predictions: FakePredictions,
+    membership: Option<PoolMember>,
+    clock: FixedClock,
+    matches: FakeMatches,
+) -> PredictionUseCases<FakePredictions, FakeMatches, FakePools, FakeMembers, FixedClock> {
     PredictionUseCases::new(
         predictions,
-        FakeMatches::with_status(MatchStatus::Scheduled),
+        matches,
         FakePools::default(),
         FakeMembers::new(membership),
         clock,
@@ -361,6 +448,7 @@ fn to_prediction(record: &UpsertPredictionRecord) -> Prediction {
         match_id: id(&record.match_id),
         home_score: Score::new(record.home_score).unwrap(),
         away_score: Score::new(record.away_score).unwrap(),
+        penalties_pick: record.penalties_pick,
         points_awarded: None,
         scored_at: None,
         created_at: now(),
@@ -372,15 +460,20 @@ fn to_prediction(record: &UpsertPredictionRecord) -> Prediction {
 struct FakeMatches {
     status: MatchStatus,
     teams_defined: bool,
+    can_go_to_penalties: bool,
 }
 
 impl FakeMatches {
     fn with_status(status: MatchStatus) -> Self {
-        Self { status, teams_defined: true }
+        Self { status, teams_defined: true, can_go_to_penalties: false }
     }
 
     fn without_teams() -> Self {
-        Self { status: MatchStatus::Scheduled, teams_defined: false }
+        Self { status: MatchStatus::Scheduled, teams_defined: false, can_go_to_penalties: false }
+    }
+
+    fn with_penalties() -> Self {
+        Self { can_go_to_penalties: true, ..Self::with_status(MatchStatus::Scheduled) }
     }
 }
 
@@ -404,6 +497,8 @@ impl MatchRepository for FakeMatches {
             status: self.status,
             home_score: None,
             away_score: None,
+            can_go_to_penalties: self.can_go_to_penalties,
+            penalties_winner: None,
             finished_at: None,
             created_at: now(),
             updated_at: now(),

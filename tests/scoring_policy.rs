@@ -1,6 +1,6 @@
 use palpites_back::domain::pools::ScoringRuleKey;
-use palpites_back::domain::predictions::{score, HitKind, ScoringRules};
-use palpites_back::domain::Score;
+use palpites_back::domain::predictions::{penalty_bonus, score, HitKind, ScoringRules};
+use palpites_back::domain::{PenaltySide, Score};
 
 fn s(value: u8) -> Score {
     Score::new(value).unwrap()
@@ -10,6 +10,14 @@ fn default_rules() -> ScoringRules {
     ScoringRules::from_rules([
         (ScoringRuleKey::ExactScore, 10),
         (ScoringRuleKey::CorrectOutcome, 5),
+    ])
+}
+
+fn penalty_rules() -> ScoringRules {
+    ScoringRules::from_rules([
+        (ScoringRuleKey::ExactScore, 10),
+        (ScoringRuleKey::CorrectOutcome, 5),
+        (ScoringRuleKey::PenaltiesWinner, 5),
     ])
 }
 
@@ -96,4 +104,66 @@ fn empty_rule_set_awards_zero_for_correct_outcome() {
     let (points, kind) = score((s(3), s(1)), (s(2), s(0)), &rules);
     assert_eq!(points, 0);
     assert_eq!(kind, HitKind::Outcome);
+}
+
+#[test]
+fn penalty_bonus_awards_points_when_draw_and_pick_is_right() {
+    let (points, hit) = penalty_bonus(
+        true,
+        Some(PenaltySide::Home),
+        Some(PenaltySide::Home),
+        &penalty_rules(),
+    );
+    assert_eq!(points, 5);
+    assert!(hit);
+}
+
+#[test]
+fn penalty_bonus_awards_zero_when_pick_is_wrong() {
+    let (points, hit) = penalty_bonus(
+        true,
+        Some(PenaltySide::Home),
+        Some(PenaltySide::Away),
+        &penalty_rules(),
+    );
+    assert_eq!(points, 0);
+    assert!(!hit);
+}
+
+#[test]
+fn penalty_bonus_awards_zero_when_prediction_is_not_a_draw() {
+    let (points, hit) = penalty_bonus(
+        false,
+        Some(PenaltySide::Home),
+        Some(PenaltySide::Home),
+        &penalty_rules(),
+    );
+    assert_eq!(points, 0);
+    assert!(!hit);
+}
+
+#[test]
+fn penalty_bonus_awards_zero_when_match_did_not_go_to_penalties() {
+    let (points, hit) = penalty_bonus(true, Some(PenaltySide::Home), None, &penalty_rules());
+    assert_eq!(points, 0);
+    assert!(!hit);
+}
+
+#[test]
+fn penalty_bonus_awards_zero_when_member_did_not_pick() {
+    let (points, hit) = penalty_bonus(true, None, Some(PenaltySide::Home), &penalty_rules());
+    assert_eq!(points, 0);
+    assert!(!hit);
+}
+
+#[test]
+fn penalty_bonus_without_rule_recognizes_hit_with_zero_points() {
+    let (points, hit) = penalty_bonus(
+        true,
+        Some(PenaltySide::Away),
+        Some(PenaltySide::Away),
+        &default_rules(),
+    );
+    assert_eq!(points, 0);
+    assert!(hit);
 }

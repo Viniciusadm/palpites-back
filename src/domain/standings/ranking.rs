@@ -9,6 +9,7 @@ pub struct RankedStanding {
     pub exact_count: i32,
     pub outcome_count: i32,
     pub hits_count: i32,
+    pub penalties_count: i32,
     pub position: i32,
 }
 
@@ -18,6 +19,7 @@ struct Tally {
     exact_count: i32,
     outcome_count: i32,
     hits_count: i32,
+    penalties_count: i32,
 }
 
 /// Pure aggregation of scored predictions into an ordered standings table.
@@ -28,16 +30,20 @@ struct Tally {
 /// by `total_points` (desc), then `hits_count` (desc), then `pool_member_id`
 /// (asc) for determinism, and `position` uses standard competition ranking:
 /// members tied on `total_points` share the same position (e.g. 1, 2, 2, 4).
+///
+/// Each line is `(pool_member_id, total_points, hit, penalty_hit)`, where
+/// `total_points` already includes any penalty bonus and `penalty_hit` flags a
+/// correct penalty-shootout pick (tracked separately in `penalties_count`).
 pub fn compute(
     members: impl IntoIterator<Item = String>,
-    lines: impl IntoIterator<Item = (String, i16, HitKind)>,
+    lines: impl IntoIterator<Item = (String, i16, HitKind, bool)>,
 ) -> Vec<RankedStanding> {
     let mut tallies: BTreeMap<String, Tally> = BTreeMap::new();
     for member_id in members {
         tallies.entry(member_id).or_default();
     }
 
-    for (member_id, points, hit) in lines {
+    for (member_id, points, hit, penalty_hit) in lines {
         let tally = tallies.entry(member_id).or_default();
         tally.total_points += i32::from(points);
         match hit {
@@ -51,6 +57,9 @@ pub fn compute(
             }
             HitKind::None => {}
         }
+        if penalty_hit {
+            tally.penalties_count += 1;
+        }
     }
 
     let mut rows: Vec<RankedStanding> = tallies
@@ -61,6 +70,7 @@ pub fn compute(
             exact_count: tally.exact_count,
             outcome_count: tally.outcome_count,
             hits_count: tally.hits_count,
+            penalties_count: tally.penalties_count,
             position: 0,
         })
         .collect();

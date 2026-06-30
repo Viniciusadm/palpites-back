@@ -7,6 +7,8 @@ use crate::domain::predictions::Prediction;
 pub struct UpsertPredictionRequest {
     pub home_score: u8,
     pub away_score: u8,
+    #[serde(default)]
+    pub penalties_pick: Option<String>,
 }
 
 impl From<UpsertPredictionRequest> for UpsertPrediction {
@@ -14,6 +16,7 @@ impl From<UpsertPredictionRequest> for UpsertPrediction {
         Self {
             home_score: value.home_score,
             away_score: value.away_score,
+            penalties_pick: value.penalties_pick,
         }
     }
 }
@@ -24,6 +27,7 @@ pub struct PredictionResponse {
     pub match_id: String,
     pub home_score: u8,
     pub away_score: u8,
+    pub penalties_pick: Option<String>,
     pub points_awarded: Option<i16>,
     pub scored_at: Option<String>,
 }
@@ -35,6 +39,10 @@ impl PredictionResponse {
             match_id: value.match_id.as_str().to_owned(),
             home_score: value.home_score.value(),
             away_score: value.away_score.value(),
+            penalties_pick: value
+                .penalties_pick
+                .as_ref()
+                .map(|side| side.as_str().to_owned()),
             points_awarded: value.points_awarded,
             scored_at: value.scored_at.as_ref().map(|value| value.as_str().to_owned()),
         }

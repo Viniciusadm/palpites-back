@@ -13,6 +13,7 @@ pub struct CreateMatchRecord {
     pub away_team_id: Option<String>,
     pub kickoff_at: String,
     pub status: String,
+    pub can_go_to_penalties: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -23,6 +24,7 @@ pub struct UpdateMatchRecord {
     pub away_team_id: Option<String>,
     pub kickoff_at: String,
     pub status: String,
+    pub can_go_to_penalties: bool,
 }
 
 #[async_trait]

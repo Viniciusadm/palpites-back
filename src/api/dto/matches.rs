@@ -9,6 +9,8 @@ pub struct CreateMatchRequest {
     pub home_team_id: Option<String>,
     pub away_team_id: Option<String>,
     pub kickoff_at: String,
+    #[serde(default)]
+    pub can_go_to_penalties: bool,
 }
 
 impl From<CreateMatchRequest> for CreateMatch {
@@ -18,6 +20,7 @@ impl From<CreateMatchRequest> for CreateMatch {
             home_team_id: value.home_team_id,
             away_team_id: value.away_team_id,
             kickoff_at: value.kickoff_at,
+            can_go_to_penalties: value.can_go_to_penalties,
         }
     }
 }
@@ -29,6 +32,8 @@ pub struct UpdateMatchRequest {
     pub away_team_id: Option<String>,
     pub kickoff_at: String,
     pub status: String,
+    #[serde(default)]
+    pub can_go_to_penalties: bool,
 }
 
 impl From<UpdateMatchRequest> for UpdateMatch {
@@ -39,6 +44,7 @@ impl From<UpdateMatchRequest> for UpdateMatch {
             away_team_id: value.away_team_id,
             kickoff_at: value.kickoff_at,
             status: value.status,
+            can_go_to_penalties: value.can_go_to_penalties,
         }
     }
 }
@@ -73,6 +79,8 @@ pub struct MatchResponse {
     pub status: String,
     pub home_score: Option<u8>,
     pub away_score: Option<u8>,
+    pub can_go_to_penalties: bool,
+    pub penalties_winner: Option<String>,
     pub finished_at: Option<String>,
 }
 
@@ -94,6 +102,11 @@ impl MatchResponse {
             status: value.status.as_str().to_owned(),
             home_score: value.home_score.as_ref().map(|score| score.value()),
             away_score: value.away_score.as_ref().map(|score| score.value()),
+            can_go_to_penalties: value.can_go_to_penalties,
+            penalties_winner: value
+                .penalties_winner
+                .as_ref()
+                .map(|side| side.as_str().to_owned()),
             finished_at: value
                 .finished_at
                 .as_ref()

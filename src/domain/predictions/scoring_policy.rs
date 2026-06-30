@@ -1,5 +1,5 @@
 use crate::domain::pools::ScoringRuleKey;
-use crate::domain::Score;
+use crate::domain::{PenaltySide, Score};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum HitKind {
@@ -23,6 +23,7 @@ pub struct ScoringRules {
     exact_score: Option<i16>,
     correct_outcome: Option<i16>,
     correct_goal_difference: Option<i16>,
+    penalties_winner: Option<i16>,
 }
 
 impl ScoringRules {
@@ -35,6 +36,7 @@ impl ScoringRules {
                 ScoringRuleKey::CorrectGoalDifference => {
                     set.correct_goal_difference = Some(points)
                 }
+                ScoringRuleKey::PenaltiesWinner => set.penalties_winner = Some(points),
             }
         }
         set
@@ -74,4 +76,26 @@ pub fn score(
     }
 
     (0, HitKind::None)
+}
+
+/// Bonus points for correctly predicting the penalty-shootout winner.
+///
+/// This is an additive category, scored independently of [`score`] (the
+/// 90-minute result). Points are only awarded when the member predicted a draw,
+/// the match actually went to penalties (`result_winner` is `Some`), and the
+/// member picked the side that won. Getting the draw right but the shootout
+/// winner wrong awards nothing. Returns `(points, hit)` where `hit` flags a
+/// correct penalty pick regardless of the rule's point value.
+pub fn penalty_bonus(
+    prediction_is_draw: bool,
+    prediction_pick: Option<PenaltySide>,
+    result_winner: Option<PenaltySide>,
+    rules: &ScoringRules,
+) -> (i16, bool) {
+    match (prediction_is_draw, prediction_pick, result_winner) {
+        (true, Some(pick), Some(winner)) if pick == winner => {
+            (rules.penalties_winner.unwrap_or(0), true)
+        }
+        _ => (0, false),
+    }
 }

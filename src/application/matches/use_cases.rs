@@ -19,6 +19,7 @@ struct ResolvedMatch {
     home_team_id: Option<String>,
     away_team_id: Option<String>,
     kickoff_at: String,
+    can_go_to_penalties: bool,
 }
 
 impl<R, N> MatchUseCases<R, N>
@@ -63,6 +64,7 @@ where
                 command.home_team_id,
                 command.away_team_id,
                 command.kickoff_at,
+                command.can_go_to_penalties,
             )
             .await?;
 
@@ -76,6 +78,7 @@ where
                 away_team_id: resolved.away_team_id,
                 kickoff_at: resolved.kickoff_at,
                 status: MatchStatus::Scheduled.as_str().to_owned(),
+                can_go_to_penalties: resolved.can_go_to_penalties,
             })
             .await?;
 
@@ -97,6 +100,7 @@ where
                 command.home_team_id,
                 command.away_team_id,
                 command.kickoff_at,
+                command.can_go_to_penalties,
             )
             .await?;
 
@@ -108,6 +112,7 @@ where
                 away_team_id: resolved.away_team_id,
                 kickoff_at: resolved.kickoff_at,
                 status: status.as_str().to_owned(),
+                can_go_to_penalties: resolved.can_go_to_penalties,
             })
             .await?;
 
@@ -133,6 +138,7 @@ where
         home_team_id: Option<String>,
         away_team_id: Option<String>,
         kickoff_at: String,
+        can_go_to_penalties: bool,
     ) -> Result<ResolvedMatch, AppError> {
         let stage_id = validate_id(stage_id, "match.stage_id")?;
         let home_team_id = validate_opt_id(home_team_id, "match.home_team_id")?;
@@ -183,6 +189,7 @@ where
             home_team_id,
             away_team_id,
             kickoff_at,
+            can_go_to_penalties,
         })
     }
 }

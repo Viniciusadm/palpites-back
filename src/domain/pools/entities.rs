@@ -85,6 +85,7 @@ pub enum ScoringRuleKey {
     ExactScore,
     CorrectOutcome,
     CorrectGoalDifference,
+    PenaltiesWinner,
 }
 
 impl ScoringRuleKey {
@@ -93,6 +94,7 @@ impl ScoringRuleKey {
             Self::ExactScore => "exact_score",
             Self::CorrectOutcome => "correct_outcome",
             Self::CorrectGoalDifference => "correct_goal_difference",
+            Self::PenaltiesWinner => "penalties_winner",
         }
     }
 
@@ -101,6 +103,7 @@ impl ScoringRuleKey {
             "exact_score" => Ok(Self::ExactScore),
             "correct_outcome" => Ok(Self::CorrectOutcome),
             "correct_goal_difference" => Ok(Self::CorrectGoalDifference),
+            "penalties_winner" => Ok(Self::PenaltiesWinner),
             _ => Err(DomainValidationError::Invalid("scoring_rule_key")),
         }
     }

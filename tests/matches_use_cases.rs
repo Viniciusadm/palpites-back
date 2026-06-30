@@ -30,6 +30,7 @@ async fn create_persists_match_with_default_scheduled_status() {
                 home_team_id: Some("home".to_owned()),
                 away_team_id: Some("away".to_owned()),
                 kickoff_at: "2026-06-11T18:00:00".to_owned(),
+                can_go_to_penalties: false,
             },
         )
         .await
@@ -58,6 +59,7 @@ async fn create_rejects_same_team() {
                 home_team_id: Some("team-1".to_owned()),
                 away_team_id: Some("team-1".to_owned()),
                 kickoff_at: "2026-06-11T18:00:00".to_owned(),
+                can_go_to_penalties: false,
             },
         )
         .await;
@@ -87,6 +89,7 @@ async fn create_rejects_team_not_in_tournament() {
                 home_team_id: Some("home".to_owned()),
                 away_team_id: Some("stranger".to_owned()),
                 kickoff_at: "2026-06-11T18:00:00".to_owned(),
+                can_go_to_penalties: false,
             },
         )
         .await;
@@ -116,6 +119,7 @@ async fn create_rejects_stage_from_other_tournament() {
                 home_team_id: None,
                 away_team_id: None,
                 kickoff_at: "2026-06-11T18:00:00".to_owned(),
+                can_go_to_penalties: false,
             },
         )
         .await;
@@ -142,6 +146,7 @@ async fn create_rejects_unknown_stage() {
                 home_team_id: None,
                 away_team_id: None,
                 kickoff_at: "2026-06-11T18:00:00".to_owned(),
+                can_go_to_penalties: false,
             },
         )
         .await;
@@ -161,6 +166,7 @@ async fn create_rejects_unknown_tournament() {
                 home_team_id: None,
                 away_team_id: None,
                 kickoff_at: "2026-06-11T18:00:00".to_owned(),
+                can_go_to_penalties: false,
             },
         )
         .await;
@@ -183,6 +189,7 @@ async fn create_rejects_invalid_kickoff() {
                 home_team_id: None,
                 away_team_id: None,
                 kickoff_at: "not-a-date".to_owned(),
+                can_go_to_penalties: false,
             },
         )
         .await;
@@ -317,6 +324,8 @@ impl MatchRepository for FakeMatches {
             status: MatchStatus::parse(&record.status).unwrap(),
             home_score: None,
             away_score: None,
+            can_go_to_penalties: false,
+            penalties_winner: None,
             finished_at: None,
             created_at: now(),
             updated_at: now(),
@@ -388,6 +397,8 @@ fn match_row(id: &str, tournament_id: &str, stage_id: &str, status: MatchStatus)
         status,
         home_score: None,
         away_score: None,
+        can_go_to_penalties: false,
+        penalties_winner: None,
         finished_at: None,
         created_at: now(),
         updated_at: now(),

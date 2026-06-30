@@ -7,7 +7,7 @@ use crate::errors::AppError;
 use crate::infrastructure::repositories::mapper;
 
 const PREDICTION_COLUMNS: &str = "SELECT id, pool_member_id, match_id, home_score, away_score, \
-     points_awarded, scored_at, created_at, updated_at FROM predictions";
+     penalties_pick, points_awarded, scored_at, created_at, updated_at FROM predictions";
 
 #[derive(Clone)]
 pub struct MySqlPredictionRepository {
@@ -36,15 +36,17 @@ fn map_write_error(error: sqlx::Error) -> AppError {
 impl PredictionRepository for MySqlPredictionRepository {
     async fn upsert(&self, record: UpsertPredictionRecord) -> Result<(), AppError> {
         sqlx::query(
-            "INSERT INTO predictions (id, pool_member_id, match_id, home_score, away_score) \
-             VALUES (?, ?, ?, ?, ?) \
-             ON DUPLICATE KEY UPDATE home_score = VALUES(home_score), away_score = VALUES(away_score)",
+            "INSERT INTO predictions (id, pool_member_id, match_id, home_score, away_score, penalties_pick) \
+             VALUES (?, ?, ?, ?, ?, ?) \
+             ON DUPLICATE KEY UPDATE home_score = VALUES(home_score), away_score = VALUES(away_score), \
+             penalties_pick = VALUES(penalties_pick)",
         )
         .bind(&record.prediction_id)
         .bind(&record.pool_member_id)
         .bind(&record.match_id)
         .bind(record.home_score)
         .bind(record.away_score)
+        .bind(record.penalties_pick.map(|side| side.as_str()))
         .execute(&self.pool)
         .await
         .map_err(map_write_error)?;
@@ -91,6 +93,7 @@ fn map_prediction(row: sqlx::mysql::MySqlRow) -> Result<Prediction, AppError> {
         match_id: mapper::id(row.try_get("match_id")?)?,
         home_score: mapper::score(row.try_get("home_score")?)?,
         away_score: mapper::score(row.try_get("away_score")?)?,
+        penalties_pick: mapper::opt_penalty_side(row.try_get("penalties_pick")?)?,
         points_awarded: row.try_get("points_awarded")?,
         scored_at: mapper::opt_datetime(row.try_get("scored_at")?)?,
         created_at: mapper::datetime(row.try_get("created_at")?)?,

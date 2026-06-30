@@ -1,6 +1,7 @@
 use async_trait::async_trait;
 
 use crate::domain::predictions::Prediction;
+use crate::domain::PenaltySide;
 use crate::errors::AppError;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -10,6 +11,7 @@ pub struct UpsertPredictionRecord {
     pub match_id: String,
     pub home_score: u8,
     pub away_score: u8,
+    pub penalties_pick: Option<PenaltySide>,
 }
 
 #[async_trait]

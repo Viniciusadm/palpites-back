@@ -22,7 +22,9 @@ use palpites_back::domain::pools::{
 };
 use palpites_back::domain::predictions::{score, HitKind, ScoringRules};
 use palpites_back::domain::standings::{ranking, Standing};
-use palpites_back::domain::{DomainId, InviteCode, NonEmptyString, Score, UtcDateTime};
+use palpites_back::domain::{
+    DomainId, InviteCode, NonEmptyString, PenaltySide, Score, UtcDateTime,
+};
 use palpites_back::errors::AppError;
 use support::{FixedClock, NoopNotifier};
 
@@ -35,9 +37,9 @@ fn ranking_orders_by_points_with_shared_positions_on_ties() {
     let rows = ranking::compute(
         ["a", "b", "c", "d"].into_iter().map(str::to_owned),
         [
-            ("a".to_owned(), 30, HitKind::Exact),
-            ("b".to_owned(), 20, HitKind::Outcome),
-            ("c".to_owned(), 20, HitKind::Exact),
+            ("a".to_owned(), 30, HitKind::Exact, false),
+            ("b".to_owned(), 20, HitKind::Outcome, false),
+            ("c".to_owned(), 20, HitKind::Exact, false),
         ],
     );
 
@@ -108,7 +110,7 @@ async fn enter_result_scores_predictions_across_pools_with_different_rules() {
     );
 
     let updated = use_cases
-        .enter_result(MATCH_ID, EnterResult { home_score: 2, away_score: 1 })
+        .enter_result(MATCH_ID, EnterResult { home_score: 2, away_score: 1, penalties_winner: None })
         .await
         .unwrap();
     assert_eq!(updated.id.as_str(), MATCH_ID);
@@ -133,6 +135,135 @@ async fn enter_result_scores_predictions_across_pools_with_different_rules() {
     assert_eq!(position_for(pool_b, "m3"), 2);
 }
 
+// --- penalties: bonus is additive and counted separately --------------------
+
+#[tokio::test]
+async fn enter_result_with_penalties_adds_bonus_only_for_the_correct_pick() {
+    let standings = FakeStandings::default();
+    standings.set_lines(
+        "pool-a",
+        vec![
+            // both predicted the exact 1x1 draw; m1 picked home (correct), m2 picked away.
+            draw_pick_line("p-a1", "m1", MATCH_ID, 1, PenaltySide::Home),
+            draw_pick_line("p-a2", "m2", MATCH_ID, 1, PenaltySide::Away),
+        ],
+    );
+
+    let scoring = FakeScoring::default();
+    scoring.set_rules(
+        "pool-a",
+        &[
+            (ScoringRuleKey::ExactScore, 10),
+            (ScoringRuleKey::CorrectOutcome, 5),
+            (ScoringRuleKey::PenaltiesWinner, 5),
+        ],
+    );
+
+    let members = FakeMembers::default();
+    members.add_active("pool-a", "m1", "u1");
+    members.add_active("pool-a", "m2", "u2");
+
+    let use_cases = ResultUseCases::new(
+        standings.clone(),
+        FakeMatches::with_penalties(MatchStatus::Scheduled),
+        scoring,
+        FakePools::default(),
+        members,
+        FixedClock::new("2026-06-18 18:00:00"),
+        NoopNotifier,
+    );
+
+    let updated = use_cases
+        .enter_result(
+            MATCH_ID,
+            EnterResult { home_score: 1, away_score: 1, penalties_winner: Some("home".to_owned()) },
+        )
+        .await
+        .unwrap();
+    assert_eq!(updated.id.as_str(), MATCH_ID);
+
+    let application = standings.last_application();
+    assert_eq!(application.penalties_winner, Some(PenaltySide::Home));
+
+    let pool_a = find_pool(&application, "pool-a");
+    // m1: exact (10) + penalty bonus (5) = 15; m2: exact (10) + no bonus = 10.
+    assert_eq!(points_for(pool_a, "p-a1"), 15);
+    assert_eq!(points_for(pool_a, "p-a2"), 10);
+    assert_eq!(penalties_for(pool_a, "m1"), 1);
+    assert_eq!(penalties_for(pool_a, "m2"), 0);
+    assert_eq!(position_for(pool_a, "m1"), 1);
+    assert_eq!(position_for(pool_a, "m2"), 2);
+}
+
+#[tokio::test]
+async fn enter_result_rejects_penalties_winner_on_a_non_draw() {
+    let members = FakeMembers::default();
+    members.add_active("pool-a", "m1", "u1");
+
+    let use_cases = ResultUseCases::new(
+        FakeStandings::default(),
+        FakeMatches::with_penalties(MatchStatus::Scheduled),
+        FakeScoring::default(),
+        FakePools::default(),
+        members,
+        FixedClock::new("2026-06-18 18:00:00"),
+        NoopNotifier,
+    );
+
+    let result = use_cases
+        .enter_result(
+            MATCH_ID,
+            EnterResult { home_score: 2, away_score: 1, penalties_winner: Some("home".to_owned()) },
+        )
+        .await;
+    assert!(matches!(result, Err(AppError::Coded { code, .. }) if code == "penalties_winner_requires_draw"));
+}
+
+#[tokio::test]
+async fn enter_result_requires_penalties_winner_on_a_draw_that_can_go_to_penalties() {
+    let members = FakeMembers::default();
+    members.add_active("pool-a", "m1", "u1");
+
+    let use_cases = ResultUseCases::new(
+        FakeStandings::default(),
+        FakeMatches::with_penalties(MatchStatus::Scheduled),
+        FakeScoring::default(),
+        FakePools::default(),
+        members,
+        FixedClock::new("2026-06-18 18:00:00"),
+        NoopNotifier,
+    );
+
+    let result = use_cases
+        .enter_result(MATCH_ID, EnterResult { home_score: 1, away_score: 1, penalties_winner: None })
+        .await;
+    assert!(matches!(result, Err(AppError::Coded { code, .. }) if code == "penalties_winner_required"));
+}
+
+#[tokio::test]
+async fn enter_result_rejects_penalties_winner_when_match_does_not_allow_penalties() {
+    let members = FakeMembers::default();
+    members.add_active("pool-a", "m1", "u1");
+
+    let use_cases = ResultUseCases::new(
+        FakeStandings::default(),
+        FakeMatches::with_status(MatchStatus::Scheduled),
+        FakeScoring::default(),
+        FakePools::default(),
+        members,
+        FixedClock::new("2026-06-18 18:00:00"),
+        NoopNotifier,
+    );
+
+    let result = use_cases
+        .enter_result(
+            MATCH_ID,
+            EnterResult { home_score: 1, away_score: 1, penalties_winner: Some("away".to_owned()) },
+        )
+        .await;
+    assert!(matches!(result, Err(AppError::Coded { code, .. }) if code == "penalties_not_allowed"));
+}
+
 // --- result can only be entered after the match was played ------------------
 
 #[tokio::test]
@@ -153,7 +284,7 @@ async fn enter_result_is_rejected_before_the_result_window_opens() {
     );
 
     let result = use_cases
-        .enter_result(MATCH_ID, EnterResult { home_score: 2, away_score: 1 })
+        .enter_result(MATCH_ID, EnterResult { home_score: 2, away_score: 1, penalties_winner: None })
         .await;
     assert!(matches!(result, Err(AppError::Coded { code, .. }) if code == "result_too_early"));
 }
@@ -343,6 +474,34 @@ fn exact_for(pool: &PoolRecompute, member_id: &str) -> i32 {
     standing_of(pool, member_id).exact_count
 }
 
+fn penalties_for(pool: &PoolRecompute, member_id: &str) -> i32 {
+    standing_of(pool, member_id).penalties_count
+}
+
+/// A scheduled draw prediction carrying a penalty-shootout pick; the result is
+/// supplied later via the overlay in `enter_result`.
+fn draw_pick_line(
+    prediction_id: &str,
+    member_id: &str,
+    match_id: &str,
+    score: u8,
+    pick: PenaltySide,
+) -> PredictionLine {
+    PredictionLine {
+        prediction_id: prediction_id.to_owned(),
+        pool_member_id: member_id.to_owned(),
+        match_id: match_id.to_owned(),
+        prediction_home: score,
+        prediction_away: score,
+        prediction_penalties_pick: Some(pick),
+        match_status: MatchStatus::Scheduled.as_str().to_owned(),
+        kickoff_at: "2026-06-18 16:00:00".to_owned(),
+        result_home: None,
+        result_away: None,
+        result_penalties_winner: None,
+    }
+}
+
 fn standing_of<'a>(pool: &'a PoolRecompute, member_id: &str) -> &'a StandingRecord {
     pool.standings
         .iter()
@@ -370,10 +529,12 @@ fn scheduled_line(
         match_id: match_id.to_owned(),
         prediction_home: home,
         prediction_away: away,
+        prediction_penalties_pick: None,
         match_status: MatchStatus::Scheduled.as_str().to_owned(),
         kickoff_at: kickoff.to_owned(),
         result_home: None,
         result_away: None,
+        result_penalties_winner: None,
     }
 }
 
@@ -393,10 +554,12 @@ fn finished_line(
         match_id: match_id.to_owned(),
         prediction_home: home,
         prediction_away: away,
+        prediction_penalties_pick: None,
         match_status: MatchStatus::Finished.as_str().to_owned(),
         kickoff_at: "2026-06-10 18:00:00".to_owned(),
         result_home: Some(result_home),
         result_away: Some(result_away),
+        result_penalties_winner: None,
     }
 }
 
@@ -409,6 +572,7 @@ fn standing(pool_id: &str, member_id: &str, total_points: i32, position: i32) ->
         exact_count: 0,
         outcome_count: 0,
         hits_count: 0,
+        penalties_count: 0,
         position,
         updated_at: now(),
     }
@@ -535,6 +699,7 @@ impl ScoringRuleRepository for FakeScoring {
 struct FakeMatches {
     status: MatchStatus,
     kickoff_at: String,
+    can_go_to_penalties: bool,
 }
 
 impl FakeMatches {
@@ -544,6 +709,14 @@ impl FakeMatches {
         Self {
             status,
             kickoff_at: "2026-06-18 16:00:00".to_owned(),
+            can_go_to_penalties: false,
+        }
+    }
+
+    fn with_penalties(status: MatchStatus) -> Self {
+        Self {
+            can_go_to_penalties: true,
+            ..Self::with_status(status)
         }
     }
 }
@@ -565,6 +738,8 @@ impl MatchRepository for FakeMatches {
             status: self.status,
             home_score: None,
             away_score: None,
+            can_go_to_penalties: self.can_go_to_penalties,
+            penalties_winner: None,
             finished_at: None,
             created_at: now(),
             updated_at: now(),

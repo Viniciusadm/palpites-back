@@ -1,4 +1,4 @@
-use crate::domain::{DomainId, DomainValidationError, Score, UtcDateTime};
+use crate::domain::{DomainId, DomainValidationError, PenaltySide, Score, UtcDateTime};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MatchStatus {
@@ -40,6 +40,8 @@ pub struct Match {
     pub status: MatchStatus,
     pub home_score: Option<Score>,
     pub away_score: Option<Score>,
+    pub can_go_to_penalties: bool,
+    pub penalties_winner: Option<PenaltySide>,
     pub finished_at: Option<UtcDateTime>,
     pub created_at: UtcDateTime,
     pub updated_at: UtcDateTime,

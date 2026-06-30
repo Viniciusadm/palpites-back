@@ -161,6 +161,32 @@ impl Score {
     }
 }
 
+/// Which side won a penalty shootout. Mirrors the home/away structure of a
+/// match score instead of referencing a team, which keeps it simple and avoids
+/// FK edge cases.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PenaltySide {
+    Home,
+    Away,
+}
+
+impl PenaltySide {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Home => "home",
+            Self::Away => "away",
+        }
+    }
+
+    pub fn parse(value: &str) -> Result<Self, DomainValidationError> {
+        match value {
+            "home" => Ok(Self::Home),
+            "away" => Ok(Self::Away),
+            _ => Err(DomainValidationError::Invalid("penalty_side")),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InviteCode(String);
 

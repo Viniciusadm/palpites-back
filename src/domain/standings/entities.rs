@@ -9,6 +9,7 @@ pub struct Standing {
     pub exact_count: i32,
     pub outcome_count: i32,
     pub hits_count: i32,
+    pub penalties_count: i32,
     pub position: i32,
     pub updated_at: UtcDateTime,
 }

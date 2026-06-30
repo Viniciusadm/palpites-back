@@ -11,9 +11,9 @@ use crate::application::results::{
 use crate::application::shared::{Clock, Notifier};
 use crate::domain::matches::{Match, MatchStatus};
 use crate::domain::pools::{MemberStatus, Pool};
-use crate::domain::predictions::{score, HitKind, ScoringRules};
+use crate::domain::predictions::{penalty_bonus, score, HitKind, ScoringRules};
 use crate::domain::standings::ranking;
-use crate::domain::Score;
+use crate::domain::{PenaltySide, Score};
 use crate::errors::AppError;
 
 pub struct ResultUseCases<S, MatchR, ScoringR, PoolR, MemberR, C, N> {
@@ -78,6 +78,13 @@ where
             ));
         }
 
+        let penalties_winner = resolve_penalties_winner(
+            &game,
+            home_score.value(),
+            away_score.value(),
+            command.penalties_winner.as_deref(),
+        )?;
+
         let now = self.now()?;
         let kickoff = parse_datetime(game.kickoff_at.as_str()).ok_or_else(|| {
             AppError::Internal("match has an invalid kickoff date-time".to_owned())
@@ -94,6 +101,7 @@ where
             match_id: match_id.to_owned(),
             home: home_score.value(),
             away: away_score.value(),
+            penalties_winner,
         };
 
         let affected = self.standings.affected_pools_for_match(match_id).await?;
@@ -108,6 +116,7 @@ where
                 match_id: match_id.to_owned(),
                 home_score: home_score.value(),
                 away_score: away_score.value(),
+                penalties_winner,
                 finished_at,
                 pools,
             })
@@ -162,14 +171,17 @@ where
             exact_count: 0,
             outcome_count: 0,
             hits_count: 0,
+            penalties_count: 0,
             errors_count: 0,
             pending_count: 0,
             entries: Vec::with_capacity(lines.len()),
         };
 
         for line in lines {
+            let prediction_penalties_pick = line.prediction_penalties_pick.map(side_to_string);
+            let result_penalties_winner = line.result_penalties_winner.map(side_to_string);
             match finished_result(&line, &rules)? {
-                Some((points, hit)) => {
+                Some((points, hit, penalty_hit)) => {
                     summary.total_points += i32::from(points);
                     match hit {
                         HitKind::Exact => {
@@ -182,6 +194,9 @@ where
                         }
                         HitKind::None => summary.errors_count += 1,
                     }
+                    if penalty_hit {
+                        summary.penalties_count += 1;
+                    }
                     summary.entries.push(HistoryEntry {
                         match_id: line.match_id,
                         match_status: line.match_status,
@@ -190,6 +205,8 @@ where
                         prediction_away: line.prediction_away,
                         result_home: line.result_home,
                         result_away: line.result_away,
+                        prediction_penalties_pick,
+                        result_penalties_winner,
                         points_awarded: Some(points),
                         hit_kind: Some(hit.as_str().to_owned()),
                     });
@@ -204,6 +221,8 @@ where
                         prediction_away: line.prediction_away,
                         result_home: line.result_home,
                         result_away: line.result_away,
+                        prediction_penalties_pick,
+                        result_penalties_winner,
                         points_awarded: None,
                         hit_kind: None,
                     });
@@ -253,6 +272,8 @@ where
                 prediction_away: line.prediction_away,
                 result_home: line.result_home,
                 result_away: line.result_away,
+                prediction_penalties_pick: line.prediction_penalties_pick.map(side_to_string),
+                result_penalties_winner: line.result_penalties_winner.map(side_to_string),
                 points_awarded: None,
             })
             .collect();
@@ -280,27 +301,34 @@ where
         let mut scored_predictions = Vec::new();
         let mut scored_lines = Vec::new();
         for line in &lines {
-            let result = match overlay {
+            let (result, result_penalties_winner) = match overlay {
                 Some(overlay) if overlay.match_id == line.match_id => {
-                    Some((overlay.home, overlay.away))
+                    (Some((overlay.home, overlay.away)), overlay.penalties_winner)
                 }
-                _ => stored_result(line),
+                _ => (stored_result(line), line.result_penalties_winner),
             };
             let Some((result_home, result_away)) = result else {
                 continue;
             };
 
-            let (points, hit) = score(
+            let (base_points, hit) = score(
                 (Score::new(line.prediction_home)?, Score::new(line.prediction_away)?),
                 (Score::new(result_home)?, Score::new(result_away)?),
                 &rules,
             );
+            let (bonus, penalty_hit) = penalty_bonus(
+                line.prediction_home == line.prediction_away,
+                line.prediction_penalties_pick,
+                result_penalties_winner,
+                &rules,
+            );
+            let points = base_points + bonus;
             scored_predictions.push(ScoredPredictionRecord {
                 prediction_id: line.prediction_id.clone(),
                 points_awarded: points,
                 scored_at: scored_at.to_owned(),
             });
-            scored_lines.push((line.pool_member_id.clone(), points, hit));
+            scored_lines.push((line.pool_member_id.clone(), points, hit, penalty_hit));
         }
 
         let standings = ranking::compute(member_ids, scored_lines)
@@ -313,6 +341,7 @@ where
                 exact_count: ranked.exact_count,
                 outcome_count: ranked.outcome_count,
                 hits_count: ranked.hits_count,
+                penalties_count: ranked.penalties_count,
                 position: ranked.position,
             })
             .collect();
@@ -380,6 +409,50 @@ struct Overlay {
     match_id: String,
     home: u8,
     away: u8,
+    penalties_winner: Option<PenaltySide>,
+}
+
+fn side_to_string(side: PenaltySide) -> String {
+    side.as_str().to_owned()
+}
+
+/// Validates and parses the penalty-shootout winner supplied with a result.
+///
+/// A winner is only accepted for a match that can go to penalties and that ended
+/// in a draw; conversely, a drawn match that can go to penalties must have one.
+fn resolve_penalties_winner(
+    game: &Match,
+    home_score: u8,
+    away_score: u8,
+    winner: Option<&str>,
+) -> Result<Option<PenaltySide>, AppError> {
+    let is_draw = home_score == away_score;
+
+    if winner.is_some() && !game.can_go_to_penalties {
+        return Err(AppError::conflict_code(
+            "penalties_not_allowed",
+            "this match cannot go to penalties",
+        ));
+    }
+    if winner.is_some() && !is_draw {
+        return Err(AppError::conflict_code(
+            "penalties_winner_requires_draw",
+            "a penalty-shootout winner is only valid for a drawn match",
+        ));
+    }
+
+    match winner {
+        Some(value) => Ok(Some(PenaltySide::parse(value)?)),
+        None => {
+            if game.can_go_to_penalties && is_draw {
+                return Err(AppError::validation_code(
+                    "penalties_winner_required",
+                    "inform who won the penalty shootout for this drawn match",
+                ));
+            }
+            Ok(None)
+        }
+    }
 }
 
 fn stored_result(line: &PredictionLine) -> Option<(u8, u8)> {
@@ -395,13 +468,22 @@ fn stored_result(line: &PredictionLine) -> Option<(u8, u8)> {
 fn finished_result(
     line: &PredictionLine,
     rules: &ScoringRules,
-) -> Result<Option<(i16, HitKind)>, AppError> {
+) -> Result<Option<(i16, HitKind, bool)>, AppError> {
     Ok(match stored_result(line) {
-        Some((result_home, result_away)) => Some(score(
-            (Score::new(line.prediction_home)?, Score::new(line.prediction_away)?),
-            (Score::new(result_home)?, Score::new(result_away)?),
-            rules,
-        )),
+        Some((result_home, result_away)) => {
+            let (base_points, hit) = score(
+                (Score::new(line.prediction_home)?, Score::new(line.prediction_away)?),
+                (Score::new(result_home)?, Score::new(result_away)?),
+                rules,
+            );
+            let (bonus, penalty_hit) = penalty_bonus(
+                line.prediction_home == line.prediction_away,
+                line.prediction_penalties_pick,
+                line.result_penalties_winner,
+                rules,
+            );
+            Some((base_points + bonus, hit, penalty_hit))
+        }
         None => None,
     })
 }

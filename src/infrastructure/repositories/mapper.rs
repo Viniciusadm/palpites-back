@@ -6,7 +6,8 @@ use crate::domain::pools::{MemberStatus, PoolRole, PoolStatus, ScoringRuleKey};
 use crate::domain::tournaments::{StageKind, TournamentStatus};
 use crate::domain::users::UserRole;
 use crate::domain::{
-    CalendarDate, DomainId, Email, InviteCode, NonEmptyString, Score, Slug, TeamCode, UtcDateTime,
+    CalendarDate, DomainId, Email, InviteCode, NonEmptyString, PenaltySide, Score, Slug, TeamCode,
+    UtcDateTime,
 };
 use crate::errors::AppError;
 
@@ -87,6 +88,12 @@ pub fn score(value: u8) -> Result<Score, AppError> {
 
 pub fn opt_score(value: Option<u8>) -> Result<Option<Score>, AppError> {
     value.map(|inner| Ok(Score::new(inner)?)).transpose()
+}
+
+pub fn opt_penalty_side(value: Option<String>) -> Result<Option<PenaltySide>, AppError> {
+    value
+        .map(|inner| Ok(PenaltySide::parse(&inner)?))
+        .transpose()
 }
 
 pub fn opt_date(value: Option<NaiveDate>) -> Result<Option<CalendarDate>, AppError> {

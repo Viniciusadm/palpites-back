@@ -10,7 +10,8 @@ use crate::infrastructure::repositories::mapper;
 
 pub(crate) const MATCH_COLUMNS: &str =
     "SELECT id, tournament_id, stage_id, home_team_id, away_team_id, \
-     kickoff_at, status, home_score, away_score, finished_at, created_at, updated_at FROM matches";
+     kickoff_at, status, home_score, away_score, can_go_to_penalties, penalties_winner, \
+     finished_at, created_at, updated_at FROM matches";
 
 #[derive(Clone)]
 pub struct MySqlMatchRepository {
@@ -87,8 +88,8 @@ impl MatchRepository for MySqlMatchRepository {
     async fn create(&self, record: CreateMatchRecord) -> Result<(), AppError> {
         sqlx::query(
             "INSERT INTO matches \
-             (id, tournament_id, stage_id, home_team_id, away_team_id, kickoff_at, status) \
-             VALUES (?, ?, ?, ?, ?, ?, ?)",
+             (id, tournament_id, stage_id, home_team_id, away_team_id, kickoff_at, status, can_go_to_penalties) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         )
         .bind(&record.match_id)
         .bind(&record.tournament_id)
@@ -97,6 +98,7 @@ impl MatchRepository for MySqlMatchRepository {
         .bind(&record.away_team_id)
         .bind(&record.kickoff_at)
         .bind(&record.status)
+        .bind(record.can_go_to_penalties)
         .execute(&self.pool)
         .await
         .map_err(map_write_error)?;
@@ -106,7 +108,8 @@ impl MatchRepository for MySqlMatchRepository {
     async fn update(&self, record: UpdateMatchRecord) -> Result<(), AppError> {
         sqlx::query(
             "UPDATE matches \
-             SET stage_id = ?, home_team_id = ?, away_team_id = ?, kickoff_at = ?, status = ? \
+             SET stage_id = ?, home_team_id = ?, away_team_id = ?, kickoff_at = ?, status = ?, \
+             can_go_to_penalties = ? \
              WHERE id = ?",
         )
         .bind(&record.stage_id)
@@ -114,6 +117,7 @@ impl MatchRepository for MySqlMatchRepository {
         .bind(&record.away_team_id)
         .bind(&record.kickoff_at)
         .bind(&record.status)
+        .bind(record.can_go_to_penalties)
         .bind(&record.match_id)
         .execute(&self.pool)
         .await
@@ -176,6 +180,8 @@ pub(crate) fn map_match(row: sqlx::mysql::MySqlRow) -> Result<Match, AppError> {
         status: mapper::match_status(row.try_get("status")?)?,
         home_score: mapper::opt_score(row.try_get("home_score")?)?,
         away_score: mapper::opt_score(row.try_get("away_score")?)?,
+        can_go_to_penalties: row.try_get("can_go_to_penalties")?,
+        penalties_winner: mapper::opt_penalty_side(row.try_get("penalties_winner")?)?,
         finished_at: mapper::opt_datetime(row.try_get("finished_at")?)?,
         created_at: mapper::datetime(row.try_get("created_at")?)?,
         updated_at: mapper::datetime(row.try_get("updated_at")?)?,

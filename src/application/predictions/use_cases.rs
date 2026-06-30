@@ -10,7 +10,7 @@ use crate::application::shared::{parse_datetime, Clock};
 use crate::domain::matches::{Match, MatchStatus};
 use crate::domain::pools::{MemberStatus, PoolStatus};
 use crate::domain::predictions::Prediction;
-use crate::domain::Score;
+use crate::domain::{PenaltySide, Score};
 use crate::errors::AppError;
 
 pub struct PredictionUseCases<PredR, MatchR, PoolR, MemberR, C> {
@@ -87,6 +87,15 @@ where
         let home_score = Score::new(command.home_score)?;
         let away_score = Score::new(command.away_score)?;
 
+        // The penalty pick is only kept when the match can go to penalties and the
+        // predicted score is a draw; otherwise it is silently cleared.
+        let penalties_pick = resolve_penalties_pick(
+            &game,
+            home_score.value(),
+            away_score.value(),
+            command.penalties_pick.as_deref(),
+        )?;
+
         self.ensure_open(&game.status, game.kickoff_at.as_str(), pool.prediction_lock_offset_minutes)?;
 
         self.predictions
@@ -96,6 +105,7 @@ where
                 match_id: match_id.to_owned(),
                 home_score: home_score.value(),
                 away_score: away_score.value(),
+                penalties_pick,
             })
             .await?;
 
@@ -106,6 +116,7 @@ where
                 &game,
                 home_score.value(),
                 away_score.value(),
+                penalties_pick,
             )
             .await?;
         }
@@ -126,6 +137,7 @@ where
         game: &Match,
         home_score: u8,
         away_score: u8,
+        penalties_pick: Option<PenaltySide>,
     ) -> Result<(), AppError> {
         let pools = self.pools.list_for_user(user_id).await?;
 
@@ -165,6 +177,7 @@ where
                     match_id: game.id.as_str().to_owned(),
                     home_score,
                     away_score,
+                    penalties_pick,
                 })
                 .await?;
         }
@@ -223,4 +236,23 @@ where
 
 fn locked() -> AppError {
     AppError::validation_code("prediction_locked", "predictions for this match are locked")
+}
+
+/// Resolves the penalty pick to persist. A pick is only meaningful when the match
+/// can go to penalties and the predicted score is a draw; in any other case it is
+/// cleared (`None`) so a stale pick never lingers when the score changes.
+fn resolve_penalties_pick(
+    game: &Match,
+    home_score: u8,
+    away_score: u8,
+    pick: Option<&str>,
+) -> Result<Option<PenaltySide>, AppError> {
+    let is_draw = home_score == away_score;
+    if !game.can_go_to_penalties || !is_draw {
+        return Ok(None);
+    }
+    match pick {
+        Some(value) => Ok(Some(PenaltySide::parse(value)?)),
+        None => Ok(None),
+    }
 }

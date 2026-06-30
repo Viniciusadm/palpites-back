@@ -1,4 +1,4 @@
-use crate::domain::{DomainId, Score, UtcDateTime};
+use crate::domain::{DomainId, PenaltySide, Score, UtcDateTime};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Prediction {
@@ -7,6 +7,7 @@ pub struct Prediction {
     pub match_id: DomainId,
     pub home_score: Score,
     pub away_score: Score,
+    pub penalties_pick: Option<PenaltySide>,
     pub points_awarded: Option<i16>,
     pub scored_at: Option<UtcDateTime>,
     pub created_at: UtcDateTime,
