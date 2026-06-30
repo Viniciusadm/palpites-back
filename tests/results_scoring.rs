@@ -20,7 +20,7 @@ use palpites_back::domain::matches::{Match, MatchStatus};
 use palpites_back::domain::pools::{
     MemberStatus, Pool, PoolMember, PoolRole, PoolScoringRule, PoolStatus, ScoringRuleKey,
 };
-use palpites_back::domain::predictions::{score, HitKind, ScoringRules};
+use palpites_back::domain::predictions::{score, HitKind, PenaltyHit, ScoringRules};
 use palpites_back::domain::standings::{ranking, Standing};
 use palpites_back::domain::{
     DomainId, InviteCode, NonEmptyString, PenaltySide, Score, UtcDateTime,
@@ -37,9 +37,9 @@ fn ranking_orders_by_points_with_shared_positions_on_ties() {
     let rows = ranking::compute(
         ["a", "b", "c", "d"].into_iter().map(str::to_owned),
         [
-            ("a".to_owned(), 30, HitKind::Exact, false),
-            ("b".to_owned(), 20, HitKind::Outcome, false),
-            ("c".to_owned(), 20, HitKind::Exact, false),
+            ("a".to_owned(), 30, HitKind::Exact, PenaltyHit::None),
+            ("b".to_owned(), 20, HitKind::Outcome, PenaltyHit::None),
+            ("c".to_owned(), 20, HitKind::Exact, PenaltyHit::None),
         ],
     );
 
@@ -193,6 +193,62 @@ async fn enter_result_with_penalties_adds_bonus_only_for_the_correct_pick() {
     assert_eq!(penalties_for(pool_a, "m2"), 0);
     assert_eq!(position_for(pool_a, "m1"), 1);
     assert_eq!(position_for(pool_a, "m2"), 2);
+}
+
+#[tokio::test]
+async fn enter_result_awards_no_draw_bonus_to_whoever_called_the_winner() {
+    let standings = FakeStandings::default();
+    standings.set_lines(
+        "pool-a",
+        vec![
+            // both predicted a decisive result on a match that ends in penalties.
+            line("p-a1", "m1", MATCH_ID, 1, 0), // predicted home win → implied home
+            line("p-a2", "m2", MATCH_ID, 0, 1), // predicted away win → implied away
+        ],
+    );
+
+    let scoring = FakeScoring::default();
+    scoring.set_rules(
+        "pool-a",
+        &[
+            (ScoringRuleKey::ExactScore, 10),
+            (ScoringRuleKey::CorrectOutcome, 5),
+            (ScoringRuleKey::PenaltiesWinner, 5),
+            (ScoringRuleKey::PenaltiesWinnerNoDraw, 2),
+        ],
+    );
+
+    let members = FakeMembers::default();
+    members.add_active("pool-a", "m1", "u1");
+    members.add_active("pool-a", "m2", "u2");
+
+    let use_cases = ResultUseCases::new(
+        standings.clone(),
+        FakeMatches::with_penalties(MatchStatus::Scheduled),
+        scoring,
+        FakePools::default(),
+        members,
+        FixedClock::new("2026-06-18 18:00:00"),
+        NoopNotifier,
+    );
+
+    use_cases
+        .enter_result(
+            MATCH_ID,
+            EnterResult { home_score: 1, away_score: 1, penalties_winner: Some("home".to_owned()) },
+        )
+        .await
+        .unwrap();
+
+    let application = standings.last_application();
+    let pool_a = find_pool(&application, "pool-a");
+    // m1 called home (the shootout winner): 0 base + 2 no-draw bonus. m2: 0.
+    assert_eq!(points_for(pool_a, "p-a1"), 2);
+    assert_eq!(points_for(pool_a, "p-a2"), 0);
+    assert_eq!(penalties_no_draw_for(pool_a, "m1"), 1);
+    assert_eq!(penalties_no_draw_for(pool_a, "m2"), 0);
+    // the with-draw counter stays untouched for these decisive predictions.
+    assert_eq!(penalties_for(pool_a, "m1"), 0);
 }
 
 #[tokio::test]
@@ -478,6 +534,10 @@ fn penalties_for(pool: &PoolRecompute, member_id: &str) -> i32 {
     standing_of(pool, member_id).penalties_count
 }
 
+fn penalties_no_draw_for(pool: &PoolRecompute, member_id: &str) -> i32 {
+    standing_of(pool, member_id).penalties_no_draw_count
+}
+
 /// A scheduled draw prediction carrying a penalty-shootout pick; the result is
 /// supplied later via the overlay in `enter_result`.
 fn draw_pick_line(
@@ -573,6 +633,7 @@ fn standing(pool_id: &str, member_id: &str, total_points: i32, position: i32) ->
         outcome_count: 0,
         hits_count: 0,
         penalties_count: 0,
+        penalties_no_draw_count: 0,
         position,
         updated_at: now(),
     }

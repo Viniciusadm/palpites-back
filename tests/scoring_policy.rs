@@ -1,5 +1,5 @@
 use palpites_back::domain::pools::ScoringRuleKey;
-use palpites_back::domain::predictions::{penalty_bonus, score, HitKind, ScoringRules};
+use palpites_back::domain::predictions::{penalty_bonus, score, HitKind, PenaltyHit, ScoringRules};
 use palpites_back::domain::{PenaltySide, Score};
 
 fn s(value: u8) -> Score {
@@ -18,6 +18,7 @@ fn penalty_rules() -> ScoringRules {
         (ScoringRuleKey::ExactScore, 10),
         (ScoringRuleKey::CorrectOutcome, 5),
         (ScoringRuleKey::PenaltiesWinner, 5),
+        (ScoringRuleKey::PenaltiesWinnerNoDraw, 2),
     ])
 }
 
@@ -106,64 +107,78 @@ fn empty_rule_set_awards_zero_for_correct_outcome() {
     assert_eq!(kind, HitKind::Outcome);
 }
 
+// --- penalty bonus: WITH-DRAW category (predicted the draw) -----------------
+
 #[test]
-fn penalty_bonus_awards_points_when_draw_and_pick_is_right() {
-    let (points, hit) = penalty_bonus(
-        true,
-        Some(PenaltySide::Home),
-        Some(PenaltySide::Home),
-        &penalty_rules(),
-    );
+fn penalty_with_draw_awards_points_when_pick_is_right() {
+    // Predicted 1x1 (draw), picked home, home won the shootout.
+    let (points, hit) = penalty_bonus(1, 1, Some(PenaltySide::Home), Some(PenaltySide::Home), &penalty_rules());
     assert_eq!(points, 5);
-    assert!(hit);
+    assert_eq!(hit, PenaltyHit::WithDraw);
 }
 
 #[test]
-fn penalty_bonus_awards_zero_when_pick_is_wrong() {
-    let (points, hit) = penalty_bonus(
-        true,
-        Some(PenaltySide::Home),
-        Some(PenaltySide::Away),
-        &penalty_rules(),
-    );
+fn penalty_with_draw_awards_zero_when_pick_is_wrong() {
+    let (points, hit) = penalty_bonus(1, 1, Some(PenaltySide::Home), Some(PenaltySide::Away), &penalty_rules());
     assert_eq!(points, 0);
-    assert!(!hit);
+    assert_eq!(hit, PenaltyHit::None);
 }
 
 #[test]
-fn penalty_bonus_awards_zero_when_prediction_is_not_a_draw() {
-    let (points, hit) = penalty_bonus(
-        false,
-        Some(PenaltySide::Home),
-        Some(PenaltySide::Home),
-        &penalty_rules(),
-    );
+fn penalty_with_draw_awards_zero_when_member_did_not_pick() {
+    let (points, hit) = penalty_bonus(0, 0, None, Some(PenaltySide::Home), &penalty_rules());
     assert_eq!(points, 0);
-    assert!(!hit);
+    assert_eq!(hit, PenaltyHit::None);
 }
+
+// --- penalty bonus: NO-DRAW category (predicted a decisive result) ----------
+
+#[test]
+fn penalty_no_draw_awards_points_when_predicted_winner_advances() {
+    // Predicted 1x0 (home win); match went to penalties and home won the shootout.
+    let (points, hit) = penalty_bonus(1, 0, None, Some(PenaltySide::Home), &penalty_rules());
+    assert_eq!(points, 2);
+    assert_eq!(hit, PenaltyHit::NoDraw);
+}
+
+#[test]
+fn penalty_no_draw_implied_side_follows_the_predicted_score() {
+    // Predicted 0x2 (away win); away won the shootout → implied pick correct.
+    let (points, hit) = penalty_bonus(0, 2, None, Some(PenaltySide::Away), &penalty_rules());
+    assert_eq!(points, 2);
+    assert_eq!(hit, PenaltyHit::NoDraw);
+}
+
+#[test]
+fn penalty_no_draw_awards_zero_when_predicted_loser() {
+    // Predicted 2x1 (home win) but away won the shootout.
+    let (points, hit) = penalty_bonus(2, 1, None, Some(PenaltySide::Away), &penalty_rules());
+    assert_eq!(points, 0);
+    assert_eq!(hit, PenaltyHit::None);
+}
+
+// --- penalty bonus: shared guards -------------------------------------------
 
 #[test]
 fn penalty_bonus_awards_zero_when_match_did_not_go_to_penalties() {
-    let (points, hit) = penalty_bonus(true, Some(PenaltySide::Home), None, &penalty_rules());
+    // Draw prediction with a pick, but no shootout happened.
+    let (points, hit) = penalty_bonus(1, 1, Some(PenaltySide::Home), None, &penalty_rules());
     assert_eq!(points, 0);
-    assert!(!hit);
-}
-
-#[test]
-fn penalty_bonus_awards_zero_when_member_did_not_pick() {
-    let (points, hit) = penalty_bonus(true, None, Some(PenaltySide::Home), &penalty_rules());
+    assert_eq!(hit, PenaltyHit::None);
+    // Same for a decisive prediction.
+    let (points, hit) = penalty_bonus(2, 0, None, None, &penalty_rules());
     assert_eq!(points, 0);
-    assert!(!hit);
+    assert_eq!(hit, PenaltyHit::None);
 }
 
 #[test]
 fn penalty_bonus_without_rule_recognizes_hit_with_zero_points() {
-    let (points, hit) = penalty_bonus(
-        true,
-        Some(PenaltySide::Away),
-        Some(PenaltySide::Away),
-        &default_rules(),
-    );
+    // default_rules has no penalty rules, but the hit category is still reported.
+    let (points, hit) = penalty_bonus(1, 1, Some(PenaltySide::Away), Some(PenaltySide::Away), &default_rules());
     assert_eq!(points, 0);
-    assert!(hit);
+    assert_eq!(hit, PenaltyHit::WithDraw);
+
+    let (points, hit) = penalty_bonus(1, 0, None, Some(PenaltySide::Home), &default_rules());
+    assert_eq!(points, 0);
+    assert_eq!(hit, PenaltyHit::NoDraw);
 }

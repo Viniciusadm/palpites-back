@@ -1,6 +1,6 @@
 use std::collections::BTreeMap;
 
-use crate::domain::predictions::HitKind;
+use crate::domain::predictions::{HitKind, PenaltyHit};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RankedStanding {
@@ -10,6 +10,7 @@ pub struct RankedStanding {
     pub outcome_count: i32,
     pub hits_count: i32,
     pub penalties_count: i32,
+    pub penalties_no_draw_count: i32,
     pub position: i32,
 }
 
@@ -20,6 +21,7 @@ struct Tally {
     outcome_count: i32,
     hits_count: i32,
     penalties_count: i32,
+    penalties_no_draw_count: i32,
 }
 
 /// Pure aggregation of scored predictions into an ordered standings table.
@@ -32,11 +34,12 @@ struct Tally {
 /// members tied on `total_points` share the same position (e.g. 1, 2, 2, 4).
 ///
 /// Each line is `(pool_member_id, total_points, hit, penalty_hit)`, where
-/// `total_points` already includes any penalty bonus and `penalty_hit` flags a
-/// correct penalty-shootout pick (tracked separately in `penalties_count`).
+/// `total_points` already includes any penalty bonus and `penalty_hit`
+/// ([`PenaltyHit`]) records which shootout category landed (tracked separately
+/// in `penalties_count` / `penalties_no_draw_count`).
 pub fn compute(
     members: impl IntoIterator<Item = String>,
-    lines: impl IntoIterator<Item = (String, i16, HitKind, bool)>,
+    lines: impl IntoIterator<Item = (String, i16, HitKind, PenaltyHit)>,
 ) -> Vec<RankedStanding> {
     let mut tallies: BTreeMap<String, Tally> = BTreeMap::new();
     for member_id in members {
@@ -57,8 +60,10 @@ pub fn compute(
             }
             HitKind::None => {}
         }
-        if penalty_hit {
-            tally.penalties_count += 1;
+        match penalty_hit {
+            PenaltyHit::WithDraw => tally.penalties_count += 1,
+            PenaltyHit::NoDraw => tally.penalties_no_draw_count += 1,
+            PenaltyHit::None => {}
         }
     }
 
@@ -71,6 +76,7 @@ pub fn compute(
             outcome_count: tally.outcome_count,
             hits_count: tally.hits_count,
             penalties_count: tally.penalties_count,
+            penalties_no_draw_count: tally.penalties_no_draw_count,
             position: 0,
         })
         .collect();

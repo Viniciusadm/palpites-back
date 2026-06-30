@@ -32,6 +32,7 @@ pub struct HistorySummary {
     pub outcome_count: i32,
     pub hits_count: i32,
     pub penalties_count: i32,
+    pub penalties_no_draw_count: i32,
     pub errors_count: i32,
     pub pending_count: i32,
     pub entries: Vec<HistoryEntry>,

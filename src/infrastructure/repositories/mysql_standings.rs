@@ -10,7 +10,8 @@ use crate::errors::AppError;
 use crate::infrastructure::repositories::mapper;
 
 const STANDING_COLUMNS: &str = "SELECT id, pool_id, pool_member_id, total_points, exact_count, \
-     outcome_count, hits_count, penalties_count, position, updated_at FROM pool_standings";
+     outcome_count, hits_count, penalties_count, penalties_no_draw_count, position, updated_at \
+     FROM pool_standings";
 
 #[derive(Clone)]
 pub struct MySqlStandingRepository {
@@ -39,7 +40,8 @@ impl StandingRepository for MySqlStandingRepository {
         pool_id: &str,
     ) -> Result<Vec<StandingWithName>, AppError> {
         let sql = "SELECT s.id, s.pool_id, s.pool_member_id, s.total_points, s.exact_count, \
-             s.outcome_count, s.hits_count, s.penalties_count, s.position, s.updated_at, u.display_name \
+             s.outcome_count, s.hits_count, s.penalties_count, s.penalties_no_draw_count, \
+             s.position, s.updated_at, u.display_name \
              FROM pool_standings s \
              JOIN pool_members pm ON pm.id = s.pool_member_id \
              JOIN users u ON u.id = pm.user_id \
@@ -135,12 +137,13 @@ async fn write_pool_recompute(
         sqlx::query(
             "INSERT INTO pool_standings \
              (id, pool_id, pool_member_id, total_points, exact_count, outcome_count, \
-              hits_count, penalties_count, position) \
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) \
+              hits_count, penalties_count, penalties_no_draw_count, position) \
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) \
              ON DUPLICATE KEY UPDATE \
               total_points = VALUES(total_points), exact_count = VALUES(exact_count), \
               outcome_count = VALUES(outcome_count), hits_count = VALUES(hits_count), \
-              penalties_count = VALUES(penalties_count), position = VALUES(position)",
+              penalties_count = VALUES(penalties_count), \
+              penalties_no_draw_count = VALUES(penalties_no_draw_count), position = VALUES(position)",
         )
         .bind(&standing.standing_id)
         .bind(&standing.pool_id)
@@ -150,6 +153,7 @@ async fn write_pool_recompute(
         .bind(standing.outcome_count)
         .bind(standing.hits_count)
         .bind(standing.penalties_count)
+        .bind(standing.penalties_no_draw_count)
         .bind(standing.position)
         .execute(&mut **tx)
         .await?;
@@ -168,6 +172,7 @@ fn map_standing(row: sqlx::mysql::MySqlRow) -> Result<Standing, AppError> {
         outcome_count: row.try_get("outcome_count")?,
         hits_count: row.try_get("hits_count")?,
         penalties_count: row.try_get("penalties_count")?,
+        penalties_no_draw_count: row.try_get("penalties_no_draw_count")?,
         position: row.try_get("position")?,
         updated_at: mapper::datetime(row.try_get("updated_at")?)?,
     })

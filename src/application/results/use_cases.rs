@@ -11,7 +11,7 @@ use crate::application::results::{
 use crate::application::shared::{Clock, Notifier};
 use crate::domain::matches::{Match, MatchStatus};
 use crate::domain::pools::{MemberStatus, Pool};
-use crate::domain::predictions::{penalty_bonus, score, HitKind, ScoringRules};
+use crate::domain::predictions::{penalty_bonus, score, HitKind, PenaltyHit, ScoringRules};
 use crate::domain::standings::ranking;
 use crate::domain::{PenaltySide, Score};
 use crate::errors::AppError;
@@ -172,6 +172,7 @@ where
             outcome_count: 0,
             hits_count: 0,
             penalties_count: 0,
+            penalties_no_draw_count: 0,
             errors_count: 0,
             pending_count: 0,
             entries: Vec::with_capacity(lines.len()),
@@ -194,8 +195,10 @@ where
                         }
                         HitKind::None => summary.errors_count += 1,
                     }
-                    if penalty_hit {
-                        summary.penalties_count += 1;
+                    match penalty_hit {
+                        PenaltyHit::WithDraw => summary.penalties_count += 1,
+                        PenaltyHit::NoDraw => summary.penalties_no_draw_count += 1,
+                        PenaltyHit::None => {}
                     }
                     summary.entries.push(HistoryEntry {
                         match_id: line.match_id,
@@ -317,7 +320,8 @@ where
                 &rules,
             );
             let (bonus, penalty_hit) = penalty_bonus(
-                line.prediction_home == line.prediction_away,
+                line.prediction_home,
+                line.prediction_away,
                 line.prediction_penalties_pick,
                 result_penalties_winner,
                 &rules,
@@ -342,6 +346,7 @@ where
                 outcome_count: ranked.outcome_count,
                 hits_count: ranked.hits_count,
                 penalties_count: ranked.penalties_count,
+                penalties_no_draw_count: ranked.penalties_no_draw_count,
                 position: ranked.position,
             })
             .collect();
@@ -468,7 +473,7 @@ fn stored_result(line: &PredictionLine) -> Option<(u8, u8)> {
 fn finished_result(
     line: &PredictionLine,
     rules: &ScoringRules,
-) -> Result<Option<(i16, HitKind, bool)>, AppError> {
+) -> Result<Option<(i16, HitKind, PenaltyHit)>, AppError> {
     Ok(match stored_result(line) {
         Some((result_home, result_away)) => {
             let (base_points, hit) = score(
@@ -477,7 +482,8 @@ fn finished_result(
                 rules,
             );
             let (bonus, penalty_hit) = penalty_bonus(
-                line.prediction_home == line.prediction_away,
+                line.prediction_home,
+                line.prediction_away,
                 line.prediction_penalties_pick,
                 line.result_penalties_winner,
                 rules,

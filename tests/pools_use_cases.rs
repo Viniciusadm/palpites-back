@@ -53,7 +53,7 @@ async fn create_seeds_rules_owner_and_invite_code() {
     assert_eq!(seeds.len(), 1);
     let seed = &seeds[0];
 
-    assert_eq!(seed.scoring_rules.len(), 3);
+    assert_eq!(seed.scoring_rules.len(), 4);
     let exact = seed
         .scoring_rules
         .iter()
@@ -72,6 +72,12 @@ async fn create_seeds_rules_owner_and_invite_code() {
         .find(|rule| rule.rule_key == "penalties_winner")
         .unwrap();
     assert_eq!(penalties.points, 5);
+    let penalties_no_draw = seed
+        .scoring_rules
+        .iter()
+        .find(|rule| rule.rule_key == "penalties_winner_no_draw")
+        .unwrap();
+    assert_eq!(penalties_no_draw.points, 2);
 
     assert_eq!(seed.owner_member.role, "owner");
     assert_eq!(seed.owner_member.user_id, "owner-1");

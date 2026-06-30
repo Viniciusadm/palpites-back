@@ -42,6 +42,7 @@ pub struct StandingRecord {
     pub outcome_count: i32,
     pub hits_count: i32,
     pub penalties_count: i32,
+    pub penalties_no_draw_count: i32,
     pub position: i32,
 }
 

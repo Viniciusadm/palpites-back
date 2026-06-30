@@ -31,6 +31,7 @@ pub struct RankingEntryResponse {
     pub outcome_count: i32,
     pub hits_count: i32,
     pub penalties_count: i32,
+    pub penalties_no_draw_count: i32,
     pub position: i32,
 }
 
@@ -44,6 +45,7 @@ impl RankingEntryResponse {
             outcome_count: value.standing.outcome_count,
             hits_count: value.standing.hits_count,
             penalties_count: value.standing.penalties_count,
+            penalties_no_draw_count: value.standing.penalties_no_draw_count,
             position: value.standing.position,
         }
     }
@@ -107,6 +109,7 @@ pub struct HistoryResponse {
     pub outcome_count: i32,
     pub hits_count: i32,
     pub penalties_count: i32,
+    pub penalties_no_draw_count: i32,
     pub errors_count: i32,
     pub pending_count: i32,
     pub entries: Vec<HistoryEntryResponse>,
@@ -121,6 +124,7 @@ impl HistoryResponse {
             outcome_count: value.outcome_count,
             hits_count: value.hits_count,
             penalties_count: value.penalties_count,
+            penalties_no_draw_count: value.penalties_no_draw_count,
             errors_count: value.errors_count,
             pending_count: value.pending_count,
             entries: value

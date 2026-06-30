@@ -18,12 +18,24 @@ impl HitKind {
     }
 }
 
+/// Which penalty-shootout category a prediction landed (mutually exclusive with
+/// each other and with no hit). `WithDraw` is the v1 category (predicted the
+/// draw and the shootout winner); `NoDraw` is the v2 category (predicted a
+/// decisive result but correctly called who won the shootout).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PenaltyHit {
+    None,
+    WithDraw,
+    NoDraw,
+}
+
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
 pub struct ScoringRules {
     exact_score: Option<i16>,
     correct_outcome: Option<i16>,
     correct_goal_difference: Option<i16>,
     penalties_winner: Option<i16>,
+    penalties_winner_no_draw: Option<i16>,
 }
 
 impl ScoringRules {
@@ -37,6 +49,9 @@ impl ScoringRules {
                     set.correct_goal_difference = Some(points)
                 }
                 ScoringRuleKey::PenaltiesWinner => set.penalties_winner = Some(points),
+                ScoringRuleKey::PenaltiesWinnerNoDraw => {
+                    set.penalties_winner_no_draw = Some(points)
+                }
             }
         }
         set
@@ -78,24 +93,48 @@ pub fn score(
     (0, HitKind::None)
 }
 
-/// Bonus points for correctly predicting the penalty-shootout winner.
+/// Bonus points for correctly calling who won a penalty shootout.
 ///
-/// This is an additive category, scored independently of [`score`] (the
-/// 90-minute result). Points are only awarded when the member predicted a draw,
-/// the match actually went to penalties (`result_winner` is `Some`), and the
-/// member picked the side that won. Getting the draw right but the shootout
-/// winner wrong awards nothing. Returns `(points, hit)` where `hit` flags a
-/// correct penalty pick regardless of the rule's point value.
+/// Additive category, scored independently of [`score`] (the 90-minute result).
+/// Only relevant when the match actually went to penalties (`result_winner` is
+/// `Some`). Two mutually exclusive sub-categories:
+/// - **WithDraw** (`penalties_winner`): the member predicted a draw and their
+///   explicit `prediction_pick` matched the shootout winner.
+/// - **NoDraw** (`penalties_winner_no_draw`): the member predicted a decisive
+///   result and the side their score points to won the shootout.
+///
+/// Returns `(points, hit)`; `hit` flags which category landed regardless of the
+/// rule's point value.
 pub fn penalty_bonus(
-    prediction_is_draw: bool,
+    prediction_home: u8,
+    prediction_away: u8,
     prediction_pick: Option<PenaltySide>,
     result_winner: Option<PenaltySide>,
     rules: &ScoringRules,
-) -> (i16, bool) {
-    match (prediction_is_draw, prediction_pick, result_winner) {
-        (true, Some(pick), Some(winner)) if pick == winner => {
-            (rules.penalties_winner.unwrap_or(0), true)
+) -> (i16, PenaltyHit) {
+    let Some(winner) = result_winner else {
+        return (0, PenaltyHit::None);
+    };
+
+    if prediction_home == prediction_away {
+        // Predicted a draw → explicit pick (v1 category).
+        match prediction_pick {
+            Some(pick) if pick == winner => {
+                (rules.penalties_winner.unwrap_or(0), PenaltyHit::WithDraw)
+            }
+            _ => (0, PenaltyHit::None),
         }
-        _ => (0, false),
+    } else {
+        // Predicted a decisive result → the winning side is implied by the score.
+        let implied = if prediction_home > prediction_away {
+            PenaltySide::Home
+        } else {
+            PenaltySide::Away
+        };
+        if implied == winner {
+            (rules.penalties_winner_no_draw.unwrap_or(0), PenaltyHit::NoDraw)
+        } else {
+            (0, PenaltyHit::None)
+        }
     }
 }
