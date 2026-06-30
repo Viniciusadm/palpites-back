@@ -50,6 +50,7 @@ pub struct MemberPredictionView {
     pub prediction_penalties_pick: Option<String>,
     pub result_penalties_winner: Option<String>,
     pub points_awarded: Option<i16>,
+    pub point_reasons: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

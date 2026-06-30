@@ -11,7 +11,9 @@ use crate::application::results::{
 use crate::application::shared::{Clock, Notifier};
 use crate::domain::matches::{Match, MatchStatus};
 use crate::domain::pools::{MemberStatus, Pool};
-use crate::domain::predictions::{penalty_bonus, score, HitKind, PenaltyHit, ScoringRules};
+use crate::domain::predictions::{
+    penalty_bonus, point_reasons, score, HitKind, PenaltyHit, ScoringRules,
+};
 use crate::domain::standings::ranking;
 use crate::domain::{PenaltySide, Score};
 use crate::errors::AppError;
@@ -253,7 +255,8 @@ where
             .ok_or_else(|| AppError::NotFound("pool member was not found".to_owned()))?;
 
         let now = self.now()?;
-        let mut views: Vec<MemberPredictionView> = self
+        let rules = self.load_rules(pool_id).await?;
+        let lines: Vec<PredictionLine> = self
             .standings
             .prediction_lines_for_pool(pool_id)
             .await?
@@ -267,7 +270,31 @@ where
                     now,
                 )
             })
-            .map(|line| MemberPredictionView {
+            .collect();
+
+        let mut views: Vec<MemberPredictionView> = Vec::with_capacity(lines.len());
+        for line in lines {
+            let (points_awarded, reasons) = match finished_result(&line, &rules)? {
+                Some((points, _, _)) => {
+                    let reasons = match (line.result_home, line.result_away) {
+                        (Some(result_home), Some(result_away)) => point_reasons(
+                            (Score::new(line.prediction_home)?, Score::new(line.prediction_away)?),
+                            (Score::new(result_home)?, Score::new(result_away)?),
+                            line.prediction_penalties_pick,
+                            line.result_penalties_winner,
+                            &rules,
+                        )
+                        .into_iter()
+                        .map(|reason| reason.to_owned())
+                        .collect(),
+                        _ => Vec::new(),
+                    };
+                    (Some(points), reasons)
+                }
+                None => (None, Vec::new()),
+            };
+
+            views.push(MemberPredictionView {
                 match_id: line.match_id,
                 match_status: line.match_status,
                 kickoff_at: line.kickoff_at,
@@ -277,9 +304,10 @@ where
                 result_away: line.result_away,
                 prediction_penalties_pick: line.prediction_penalties_pick.map(side_to_string),
                 result_penalties_winner: line.result_penalties_winner.map(side_to_string),
-                points_awarded: None,
-            })
-            .collect();
+                points_awarded,
+                point_reasons: reasons,
+            });
+        }
         views.sort_by(|a, b| a.kickoff_at.cmp(&b.kickoff_at));
         Ok(views)
     }

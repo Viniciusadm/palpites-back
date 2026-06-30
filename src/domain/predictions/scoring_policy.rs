@@ -138,3 +138,39 @@ pub fn penalty_bonus(
         }
     }
 }
+
+pub fn point_reasons(
+    prediction: (Score, Score),
+    result: (Score, Score),
+    prediction_pick: Option<PenaltySide>,
+    result_winner: Option<PenaltySide>,
+    rules: &ScoringRules,
+) -> Vec<&'static str> {
+    let (ph, pa) = (prediction.0.value(), prediction.1.value());
+    let (rh, ra) = (result.0.value(), result.1.value());
+
+    let mut reasons = Vec::new();
+
+    let (_, hit) = score(prediction, result, rules);
+    match hit {
+        HitKind::Exact => reasons.push("exact"),
+        HitKind::Outcome => {
+            let difference_matches = (ph as i16 - pa as i16) == (rh as i16 - ra as i16);
+            if difference_matches && rules.correct_goal_difference.is_some() {
+                reasons.push("goal_difference");
+            } else {
+                reasons.push("outcome");
+            }
+        }
+        HitKind::None => {}
+    }
+
+    let (_, penalty_hit) = penalty_bonus(ph, pa, prediction_pick, result_winner, rules);
+    match penalty_hit {
+        PenaltyHit::WithDraw => reasons.push("penalties_winner"),
+        PenaltyHit::NoDraw => reasons.push("penalties_winner_no_draw"),
+        PenaltyHit::None => {}
+    }
+
+    reasons
+}

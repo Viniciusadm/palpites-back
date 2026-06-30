@@ -1,5 +1,7 @@
 use palpites_back::domain::pools::ScoringRuleKey;
-use palpites_back::domain::predictions::{penalty_bonus, score, HitKind, PenaltyHit, ScoringRules};
+use palpites_back::domain::predictions::{
+    penalty_bonus, point_reasons, score, HitKind, PenaltyHit, ScoringRules,
+};
 use palpites_back::domain::{PenaltySide, Score};
 
 fn s(value: u8) -> Score {
@@ -181,4 +183,52 @@ fn penalty_bonus_without_rule_recognizes_hit_with_zero_points() {
     let (points, hit) = penalty_bonus(1, 0, None, Some(PenaltySide::Home), &default_rules());
     assert_eq!(points, 0);
     assert_eq!(hit, PenaltyHit::NoDraw);
+}
+
+// --- point reasons (labels do modal) ----------------------------------------
+
+#[test]
+fn reasons_exact_score() {
+    let r = point_reasons((s(2), s(1)), (s(2), s(1)), None, None, &penalty_rules());
+    assert_eq!(r, vec!["exact"]);
+}
+
+#[test]
+fn reasons_outcome_only() {
+    let r = point_reasons((s(3), s(1)), (s(2), s(0)), None, None, &penalty_rules());
+    assert_eq!(r, vec!["outcome"]);
+}
+
+#[test]
+fn reasons_goal_difference_when_rule_is_configured() {
+    let rules = ScoringRules::from_rules([
+        (ScoringRuleKey::CorrectOutcome, 5),
+        (ScoringRuleKey::CorrectGoalDifference, 7),
+    ]);
+    let r = point_reasons((s(3), s(1)), (s(2), s(0)), None, None, &rules);
+    assert_eq!(r, vec!["goal_difference"]);
+}
+
+#[test]
+fn reasons_exact_plus_penalties_with_draw() {
+    let r = point_reasons(
+        (s(1), s(1)),
+        (s(1), s(1)),
+        Some(PenaltySide::Home),
+        Some(PenaltySide::Home),
+        &penalty_rules(),
+    );
+    assert_eq!(r, vec!["exact", "penalties_winner"]);
+}
+
+#[test]
+fn reasons_penalties_no_draw_only() {
+    let r = point_reasons((s(1), s(0)), (s(1), s(1)), None, Some(PenaltySide::Home), &penalty_rules());
+    assert_eq!(r, vec!["penalties_winner_no_draw"]);
+}
+
+#[test]
+fn reasons_empty_when_nothing_scored() {
+    let r = point_reasons((s(0), s(2)), (s(2), s(0)), None, None, &penalty_rules());
+    assert!(r.is_empty());
 }

@@ -148,6 +148,7 @@ pub struct MemberPredictionResponse {
     pub prediction_penalties_pick: Option<String>,
     pub result_penalties_winner: Option<String>,
     pub points_awarded: Option<i16>,
+    pub point_reasons: Vec<String>,
 }
 
 impl MemberPredictionResponse {
@@ -163,6 +164,7 @@ impl MemberPredictionResponse {
             prediction_penalties_pick: value.prediction_penalties_pick.clone(),
             result_penalties_winner: value.result_penalties_winner.clone(),
             points_awarded: value.points_awarded,
+            point_reasons: value.point_reasons.clone(),
         }
     }
 }
